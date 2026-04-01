@@ -1,0 +1,24 @@
+{
+    "name": "aiusage",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "turbo build",
+        "dev": "turbo dev",
+        "lint": "turbo lint",
+        "test": "turbo test"
+    },
+    "devDependencies": {
+        "tsx": "^4.21.0",
+        "turbo": "^2",
+        "typescript": "^5"
+    },
+    "packageManager": "pnpm@10.6.5",
+    "pnpm": {
+        "onlyBuiltDependencies": [
+            "esbuild",
+            "workerd",
+            "sharp"
+        ]
+    }
+}

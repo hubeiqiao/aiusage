@@ -1,0 +1,24 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "aiusage",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "aiusage-db",
+      "database_id": "<YOUR_D1_DATABASE_ID>"
+    }
+  ],
+  // 部署时通过 wrangler secret put 设置:
+  // - SITE_ID
+  // - ENROLL_TOKEN
+  // - DEVICE_TOKEN_SECRET
+  // - PROJECT_NAME_SALT
+  "vars": {
+    "MAX_DEVICES": "10",
+    "PUBLIC_PROJECT_VISIBILITY": "masked",
+    "DEFAULT_TIMEZONE": "Asia/Shanghai"
+  }
+}

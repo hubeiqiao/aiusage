@@ -1,0 +1,57 @@
+import { handleHealth } from './routes/health.js';
+import { handleEnroll } from './routes/enroll.js';
+import { handleIngest } from './routes/ingest.js';
+import { handleOverview } from './routes/overview.js';
+import { handleBreakdowns } from './routes/breakdowns.js';
+import { handleHome } from './routes/home.js';
+import { handlePricing } from './routes/pricing.js';
+import { corsHeaders, jsonError } from './utils/response.js';
+import type { Env } from './types.js';
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const { pathname } = url;
+
+    // CORS preflight
+    if (request.method === 'OPTIONS' && pathname.startsWith('/api/v1/public/')) {
+      return new Response(null, { status: 204, headers: corsHeaders() });
+    }
+
+    try {
+      if (pathname === '/' && request.method === 'GET') {
+        return handleHome(env);
+      }
+      if (pathname === '/pricing' && request.method === 'GET') {
+        return handlePricing(env);
+      }
+      if (pathname === '/favicon.ico') {
+        return new Response(null, { status: 204 });
+      }
+
+      // ── 设备接口 ──
+      if (pathname === '/api/v1/health' && request.method === 'GET') {
+        return handleHealth(env);
+      }
+      if (pathname === '/api/v1/enroll' && request.method === 'POST') {
+        return handleEnroll(request, env);
+      }
+      if (pathname === '/api/v1/ingest/daily' && request.method === 'POST') {
+        return handleIngest(request, env);
+      }
+
+      // ── 公开接口 ──
+      if (pathname === '/api/v1/public/overview' && request.method === 'GET') {
+        return handleOverview(url, env);
+      }
+      if (pathname === '/api/v1/public/breakdowns' && request.method === 'GET') {
+        return handleBreakdowns(url, env);
+      }
+
+      return jsonError(404, 'NOT_FOUND', 'Route not found');
+    } catch (err) {
+      console.error('Unhandled error:', err);
+      return jsonError(500, 'INTERNAL_ERROR', 'Internal server error');
+    }
+  },
+} satisfies ExportedHandler<Env>;
