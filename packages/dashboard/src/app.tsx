@@ -1,452 +1,1080 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
-  Sankey, ResponsiveContainer, XAxis, YAxis, Tooltip
+  Sankey, ResponsiveContainer, XAxis, YAxis, Tooltip,
 } from 'recharts';
-import { RefreshCw, BarChart2, Zap, Calendar, Database, Filter } from 'lucide-react';
+import { RotateCw, SlidersHorizontal, Github, Heart } from 'lucide-react';
 import type { OverviewResponse, SankeyGraph } from '@aiusage/shared';
-import { Button } from './components/ui/button';
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from './components/ui/chart';
-import { Select } from './components/ui/select';
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
+} from './components/ui/chart';
+import { DEMO_OVERVIEW, DEMO_HEALTH } from './demo-data';
 
-const PIE_COLORS = ['#0f172a', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0'];
-const TOKEN_SERIES = [
-  { key: 'inputTokens', label: 'Input', color: '#64748b' },
-  { key: 'cachedInputTokens', label: 'Cached', color: '#94a3b8' },
-  { key: 'cacheWriteTokens', label: 'Write', color: '#cbd5e1' },
-  { key: 'outputTokens', label: 'Output', color: '#0f172a' },
-  { key: 'reasoningOutputTokens', label: 'Reasoning', color: '#334155' },
+// ────────────────────────────────────────
+// Constants
+// ────────────────────────────────────────
+
+const RANGES = [
+  { value: '7d', label: '7D' },
+  { value: '30d', label: '30D' },
+  { value: '90d', label: '90D' },
+  { value: 'all', label: 'All' },
 ] as const;
-const RANGE_OPTIONS = [
-  { value: '7d', label: 'Last 7 Days' },
-  { value: '30d', label: 'Last 30 Days' },
-  { value: '90d', label: 'Last 90 Days' },
-  { value: 'all', label: 'All Time' },
+
+const TOKEN_SERIES = [
+  { key: 'inputTokens' as const, label: 'Input', color: '#0f172a' },
+  { key: 'cachedInputTokens' as const, label: 'Cached', color: '#334155' },
+  { key: 'cacheWriteTokens' as const, label: 'Cache Write', color: '#64748b' },
+  { key: 'outputTokens' as const, label: 'Output', color: '#94a3b8' },
+  { key: 'reasoningOutputTokens' as const, label: 'Reasoning', color: '#cbd5e1' },
 ];
 
-const COST_CHART_CONFIG = { estimatedCostUsd: { label: 'Cost', color: '#0f172a' } } satisfies ChartConfig;
-const TOKEN_CHART_CONFIG = Object.fromEntries(TOKEN_SERIES.map((s) => [s.key, { label: s.label, color: s.color }])) satisfies ChartConfig;
+const CHART_COLORS = [
+  '#0f172a', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0',
+];
 
-type RangeValue = '7d' | '30d' | '90d' | 'all';
+const COST_CONFIG = {
+  estimatedCostUsd: { label: 'Cost', color: '#0f172a' },
+} satisfies ChartConfig;
 
-interface FacetOption { value: string; label: string; }
-interface OverviewPayload extends OverviewResponse { ok: boolean; }
-interface BreakdownRow {
-  device_id: string; usage_date: string; provider: string; product: string; channel: string;
-  model: string; project: string; event_count: number; input_tokens: number;
-  cached_input_tokens: number; cache_write_tokens: number; output_tokens: number;
-  reasoning_output_tokens: number; total_tokens: number; estimated_cost_usd: number;
+const TOKEN_CONFIG = Object.fromEntries(
+  TOKEN_SERIES.map((s) => [s.key, { label: s.label, color: s.color }]),
+) satisfies ChartConfig;
+
+// ────────────────────────────────────────
+// Types
+// ────────────────────────────────────────
+
+interface FiltersState {
+  range: string;
+  deviceId: string;
+  provider: string;
+  product: string;
+  channel: string;
+  model: string;
 }
-interface BreakdownPayload {
-  ok: boolean; data: BreakdownRow[]; sort: string; order: string;
-  pagination: { total: number; limit: number; offset: number; hasMore: boolean; };
-}
-interface HealthPayload { ok: boolean; siteId: string; version: string; }
-interface FiltersState { range: string; deviceId: string; provider: string; product: string; channel: string; model: string; }
-interface TableState { offset: number; limit: number; sort: string; order: 'asc' | 'desc'; }
 
-class ChartBoundary extends React.Component<{ children: React.ReactNode; title: string }, { hasError: boolean }> {
-  constructor(props: { children: React.ReactNode; title: string }) { super(props); this.state = { hasError: false }; }
-  static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(error: unknown) { console.error(`${this.props.title} crashed`, error); }
-  render() {
-    if (this.state.hasError) return <ChartEmpty label={`${this.props.title} Error`} danger />;
-    return this.props.children;
+interface HealthPayload { ok: boolean; siteId: string; version: string }
+interface OverviewPayload extends OverviewResponse { ok: boolean }
+interface FacetOption { value: string; label: string }
+
+// ────────────────────────────────────────
+// Utilities
+// ────────────────────────────────────────
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const ct = r.headers.get('content-type') ?? '';
+  if (!ct.includes('application/json')) {
+    throw new Error('Response is not JSON');
   }
+  return r.json() as Promise<T>;
 }
 
-function fetchJson<T>(url: string): Promise<T> {
-  return fetch(url).then((res) => {
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json() as Promise<T>;
+function formatUsd(v: number): string {
+  const n = Number(v || 0);
+  if (n >= 100) return `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  if (n >= 10) return `$${n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatUsdFull(v: number): string {
+  return `$${Number(v || 0).toFixed(4)}`;
+}
+
+function formatCompact(v: number): string {
+  const n = Number(v || 0);
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+function formatNumber(v: number): string {
+  return new Intl.NumberFormat('en-US').format(Number(v || 0));
+}
+
+function formatPercent(v: number): string {
+  return `${Number(v || 0).toFixed(1)}%`;
+}
+
+function formatModelName(raw: string): string {
+  if (!raw || raw === '<synthetic>') return 'Other';
+  let s = raw.replace(/-\d{8}$/, '');          // strip date suffix
+  s = s.replace(/(\d+)-(\d+)/g, '$1.$2');      // version: 4-6 → 4.6
+  s = s.replace(/-/g, ' ');                     // dashes → spaces
+  s = s.replace(/^claude\b/i, 'Claude');
+  s = s.replace(/^gpt\s/i, 'GPT-');            // keep GPT- brand dash
+  s = s.replace(/^o(\d)/i, 'O$1');
+  s = s.replace(/(?<=\s)[a-z]/g, (c) => c.toUpperCase());
+  return s;
+}
+
+/** Get all YYYY-MM-DD dates for the current month (1st to last day). */
+function currentMonthDates(): string[] {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const last = new Date(y, m + 1, 0).getDate();
+  const result: string[] = [];
+  for (let d = 1; d <= last; d++) {
+    result.push(`${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  }
+  return result;
+}
+
+function shortDate(v: string): string { return v.slice(5); }
+
+function longDate(v: string): string {
+  const d = new Date(v);
+  return Number.isNaN(d.getTime())
+    ? v
+    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/** Filter overview data to current month and pad remaining days with zeros. */
+function padMonth(ov: OverviewPayload): OverviewPayload {
+  const allDates = currentMonthDates();
+
+  const trendMap = new Map(ov.dailyTrend.map((d) => [d.usageDate, d]));
+  const compMap = new Map(ov.tokenComposition.map((d) => [d.usageDate, d]));
+
+  const dailyTrend = allDates.map((date) => trendMap.get(date) ?? { usageDate: date, eventCount: 0, estimatedCostUsd: 0 });
+  const tokenComposition = allDates.map((date) => compMap.get(date) ?? {
+    usageDate: date, inputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0,
+    outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0,
   });
+
+  const monthTrend = dailyTrend.filter((d) => d.estimatedCostUsd > 0);
+  const totalCostUsd = arrSum(monthTrend.map((d) => d.estimatedCostUsd));
+  const totalEvents = arrSum(monthTrend.map((d) => d.eventCount));
+  const activeDays = monthTrend.length;
+
+  // Scale share/sankey data by cost ratio (month vs full range)
+  const ratio = ov.totalCostUsd > 0 ? totalCostUsd / ov.totalCostUsd : 0;
+  const eventRatio = ov.totalEvents > 0 ? totalEvents / ov.totalEvents : 0;
+
+  function scaleShares<T extends { estimatedCostUsd: number; eventCount: number }>(items: T[]): T[] {
+    return items.map((it) => ({
+      ...it,
+      estimatedCostUsd: +(it.estimatedCostUsd * ratio).toFixed(4),
+      eventCount: Math.round(it.eventCount * eventRatio),
+    }));
+  }
+
+  const sankey = ov.sankey.nodes.length ? {
+    nodes: ov.sankey.nodes.map((n) => ({ ...n, totalTokens: Math.round(n.totalTokens * ratio) })),
+    links: ov.sankey.links.map((l) => ({ ...l, value: Math.round(l.value * ratio) })),
+  } : ov.sankey;
+
+  return {
+    ...ov,
+    totalDays: allDates.length,
+    activeDays,
+    totalEvents,
+    totalCostUsd,
+    averageDailyCostUsd: activeDays > 0 ? totalCostUsd / activeDays : 0,
+    dailyTrend,
+    tokenComposition,
+    modelCostShare: scaleShares(ov.modelCostShare),
+    channelCostShare: scaleShares(ov.channelCostShare),
+    sankey,
+    filters: {
+      ...ov.filters,
+      options: {
+        ...ov.filters.options,
+        providers: scaleShares(ov.filters.options.providers),
+      },
+    },
+  };
 }
 
-function formatUsd(value: number): string { return `$${Number(value || 0).toFixed(4)}`; }
-function formatUsdCompact(value: number): string {
-  const amount = Number(value || 0);
-  if (amount >= 1000) return `$${amount.toFixed(0)}`;
-  if (amount >= 100) return `$${amount.toFixed(1)}`;
-  if (amount >= 10) return `$${amount.toFixed(1)}`;
-  return `$${amount.toFixed(2)}`;
-}
-function formatNumber(value: number): string { return new Intl.NumberFormat('en-US').format(Number(value || 0)); }
-function shortDate(value: string): string { return value.slice(5); }
-function longDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+function buildQuery(f: FiltersState): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(f)) {
+    if (!v) continue;
+    // "month" is frontend-only; request 30d from API
+    p.set(k, k === 'range' && v === 'month' ? '30d' : v);
+  }
+  return p.toString();
 }
 
-function buildQuery(filters: FiltersState): string {
-  const params = new URLSearchParams();
-  Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v); });
-  return params.toString();
+function arrSum(arr: number[]): number {
+  return arr.reduce((a, b) => a + Number(b || 0), 0);
 }
 
-function buildBreakdownQuery(filters: FiltersState, table: TableState): string {
-  const params = new URLSearchParams(buildQuery(filters));
-  params.set('limit', String(table.limit)); params.set('offset', String(table.offset));
-  params.set('sort', table.sort); params.set('order', table.order);
-  return params.toString();
-}
-
-function sum(values: number[]): number { return values.reduce((total, value) => total + Number(value || 0), 0); }
-
-function foldItems<T extends { estimatedCostUsd: number; label: string; value: string }>(items: T[], limit: number): T[] {
+function foldItems<T extends { estimatedCostUsd: number; label: string; value: string }>(
+  items: T[],
+  limit: number,
+): T[] {
   if (items.length <= limit) return items;
   const head = items.slice(0, limit - 1);
   const tail = items.slice(limit - 1);
-  const other = tail.reduce((acc, item) => ({ ...acc, estimatedCostUsd: acc.estimatedCostUsd + Number(item.estimatedCostUsd || 0) }), { ...tail[0], value: 'other', label: 'Other', estimatedCostUsd: 0 });
+  const other = tail.reduce(
+    (acc, it) => ({ ...acc, estimatedCostUsd: acc.estimatedCostUsd + Number(it.estimatedCostUsd || 0) }),
+    { ...tail[0], value: 'other', label: 'Other', estimatedCostUsd: 0 },
+  );
   return [...head, other];
 }
 
 function transformSankey(input?: SankeyGraph) {
-  if (!input || !input.nodes.length || !input.links.length) return null;
-  const nodes = input.nodes.map(n => ({ name: n.label || n.id }));
-  const idToIndex = new Map(input.nodes.map((n, i) => [n.id, i]));
-  const links = input.links
-    .map(l => ({ source: idToIndex.get(l.source), target: idToIndex.get(l.target), value: Number(l.value || 0) }))
-    .filter((l): l is { source: number; target: number; value: number } => l.source !== undefined && l.target !== undefined && l.value > 0);
-  if (!links.length) return null;
-  return { nodes, links };
+  if (!input?.nodes.length || !input?.links.length) return null;
+
+  // Fold small target nodes into "Other" if too many
+  const MAX_TARGETS = 8;
+  const targetIds = new Set(input.links.map((l) => l.target));
+  const sourceIds = new Set(input.links.map((l) => l.source));
+  const pureTargets = [...targetIds].filter((id) => !sourceIds.has(id));
+
+  let nodes = input.nodes;
+  let links = input.links;
+
+  if (pureTargets.length > MAX_TARGETS) {
+    const targetVolume = new Map<string, number>();
+    for (const l of links) {
+      if (pureTargets.includes(l.target)) {
+        targetVolume.set(l.target, (targetVolume.get(l.target) || 0) + Number(l.value || 0));
+      }
+    }
+    const sorted = [...targetVolume.entries()].sort((a, b) => b[1] - a[1]);
+    const keepSet = new Set(sorted.slice(0, MAX_TARGETS - 1).map(([id]) => id));
+    const otherId = '__other__';
+
+    nodes = [
+      ...input.nodes.filter((n) => !pureTargets.includes(n.id) || keepSet.has(n.id)),
+      { id: otherId, label: 'Other', layer: Math.max(...input.nodes.map((n) => n.layer)), totalTokens: 0 },
+    ];
+    links = input.links.map((l) =>
+      pureTargets.includes(l.target) && !keepSet.has(l.target)
+        ? { ...l, target: otherId }
+        : l,
+    );
+  }
+
+  const nodeList = nodes.map((n) => ({ name: n.label || n.id }));
+  const idToIdx = new Map(nodes.map((n, i) => [n.id, i]));
+
+  // Merge duplicate links (same source→target after folding)
+  const merged = new Map<string, { source: number; target: number; value: number }>();
+  for (const l of links) {
+    const si = idToIdx.get(l.source);
+    const ti = idToIdx.get(l.target);
+    if (si === undefined || ti === undefined || Number(l.value || 0) <= 0) continue;
+    const key = `${si}-${ti}`;
+    const prev = merged.get(key);
+    if (prev) prev.value += Number(l.value);
+    else merged.set(key, { source: si, target: ti, value: Number(l.value) });
+  }
+
+  const finalLinks = [...merged.values()];
+  return finalLinks.length ? { nodes: nodeList, links: finalLinks } : null;
 }
 
-function ChartEmpty({ label, danger = false }: { label: string; danger?: boolean }) {
-  return <div className={`grid min-h-[220px] place-items-center text-sm ${danger ? 'text-red-500' : 'text-slate-400'}`}>{label}</div>;
+// ────────────────────────────────────────
+// Primitives
+// ────────────────────────────────────────
+
+class ChartBoundary extends React.Component<
+  { children: React.ReactNode; name: string },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; name: string }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: unknown) { console.error(`Chart [${this.props.name}]:`, err); }
+  render() {
+    if (this.state.hasError) {
+      return <EmptyState label={`${this.props.name} failed to render`} />;
+    }
+    return this.props.children;
+  }
 }
 
-function SimpleKpiCard({ label, value, icon: Icon }: { label: string; value: string; icon: React.ElementType }) {
+function EmptyState({ label }: { label: string }) {
   return (
-    <div className="minimal-card p-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-slate-500">{label}</div>
-        <Icon className="h-4 w-4 text-slate-400" />
+    <div className="flex min-h-[200px] items-center justify-center text-[13px] text-slate-300">
+      {label}
+    </div>
+  );
+}
+
+function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse rounded-lg bg-slate-100 ${className}`} />;
+}
+
+// ────────────────────────────────────────
+// Controls
+// ────────────────────────────────────────
+
+function SegmentedControl({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="inline-flex items-center rounded-lg bg-slate-100/80 p-0.5" role="radiogroup">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          role="radio"
+          aria-checked={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={`rounded-md px-3 py-1.5 text-[13px] font-medium transition-all duration-150 ${
+            value === o.value
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FilterPopover({
+  filters,
+  options,
+  onChange,
+}: {
+  filters: FiltersState;
+  options: { devices: FacetOption[]; providers: FacetOption[]; products: FacetOption[]; channels: FacetOption[]; models: FacetOption[] };
+  onChange: (patch: Partial<FiltersState>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const activeCount = [
+    filters.deviceId, filters.provider, filters.product, filters.channel, filters.model,
+  ].filter(Boolean).length;
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const dims = [
+    { key: 'deviceId' as const, label: 'Device', opts: options.devices },
+    { key: 'provider' as const, label: 'Provider', opts: options.providers },
+    { key: 'product' as const, label: 'Product', opts: options.products },
+    { key: 'channel' as const, label: 'Channel', opts: options.channels },
+    { key: 'model' as const, label: 'Model', opts: options.models },
+  ];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all duration-150 ${
+          open || activeCount > 0
+            ? 'bg-slate-900 text-white'
+            : 'bg-slate-100/80 text-slate-500 hover:text-slate-700'
+        }`}
+      >
+        <SlidersHorizontal className="h-3.5 w-3.5" />
+        <span>Filters</span>
+        {activeCount > 0 && (
+          <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-white/20 px-1 text-[10px] font-semibold">
+            {activeCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-2 w-[300px] rounded-xl border border-slate-200/80 bg-white p-4 shadow-[0_12px_40px_rgba(0,0,0,0.08)]">
+          <div className="mb-3.5 flex items-center justify-between">
+            <span className="text-[13px] font-semibold text-slate-900">Filters</span>
+            {activeCount > 0 && (
+              <button
+                className="text-[12px] text-slate-400 transition-colors hover:text-slate-600"
+                onClick={() => onChange({ deviceId: '', provider: '', product: '', channel: '', model: '' })}
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+          <div className="grid gap-3">
+            {dims.map((d) => (
+              <div key={d.key}>
+                <label className="mb-1 block text-[11px] font-medium tracking-wide text-slate-400">
+                  {d.label}
+                </label>
+                <select
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-700 outline-none transition-colors focus:border-slate-300"
+                  value={filters[d.key]}
+                  onChange={(e) => onChange({ [d.key]: e.target.value })}
+                >
+                  <option value="">All</option>
+                  {d.opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────
+// KPI
+// ────────────────────────────────────────
+
+function KpiCard({
+  label,
+  value,
+  highlight = false,
+  suffix,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  suffix?: string;
+}) {
+  return (
+    <div className="px-4 py-4 sm:px-5 sm:py-5">
+      <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400">
+        {label}
       </div>
-      <div className="mt-2 text-3xl font-bold tracking-tight text-slate-900 tabular-nums">
+      <div
+        className={`mt-1.5 text-[22px] font-semibold tracking-tight tabular-nums leading-none ${
+          highlight ? 'text-emerald-600' : 'text-slate-900'
+        }`}
+      >
         {value}
+        {suffix && <span className="text-slate-300">{suffix}</span>}
       </div>
     </div>
   );
 }
 
-function MinimalSelect({ value, options, onChange, placeholder }: { value: string; options: FacetOption[]; onChange: (v: string) => void; placeholder: string; }) {
+// ────────────────────────────────────────
+// Section Header
+// ────────────────────────────────────────
+
+function SectionHeader({ title, stat }: { title: string; stat?: string }) {
   return (
-    <select
-      className="h-9 min-w-[120px] rounded-md border border-slate-200 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      <option value="">{placeholder}</option>
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>{opt.label}</option>
-      ))}
-    </select>
+    <div className="mb-5 flex items-baseline justify-between">
+      <h2 className="text-[15px] font-semibold tracking-tight text-slate-900">{title}</h2>
+      {stat && (
+        <span className="text-[14px] font-semibold tabular-nums text-slate-900">{stat}</span>
+      )}
+    </div>
   );
 }
 
-function CostChart({ data }: { data: OverviewPayload['dailyTrend'] }) {
-  if (!data.length) return <ChartEmpty label="No data" />;
+// ────────────────────────────────────────
+// Chart Legend
+// ────────────────────────────────────────
+
+function ChartLegend({ items }: { items: { label: string; color: string; value?: string }[] }) {
   return (
-    <ChartContainer config={COST_CHART_CONFIG} className="h-[300px] w-full">
+    <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
+      {items.map((it) => (
+        <div key={it.label} className="flex items-center gap-1.5 text-[12px]">
+          <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ backgroundColor: it.color }} />
+          <span className="text-slate-500">{it.label}</span>
+          {it.value && <span className="ml-0.5 font-medium tabular-nums text-slate-700">{it.value}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────
+// Charts
+// ────────────────────────────────────────
+
+function CostTrendChart({ data }: { data: OverviewPayload['dailyTrend'] }) {
+  if (!data.length) return <EmptyState label="No data" />;
+  return (
+    <ChartContainer config={COST_CONFIG} className="h-[280px] w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 10, left: 10, right: 10, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 12, left: 4, right: 12, bottom: 0 }}>
           <defs>
-            <linearGradient id="cost-gradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#0f172a" stopOpacity={0.2} />
-              <stop offset="95%" stopColor="#0f172a" stopOpacity={0} />
+            <linearGradient id="cost-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#0f172a" stopOpacity={0.2} />
+              <stop offset="60%" stopColor="#0f172a" stopOpacity={0.05} />
+              <stop offset="100%" stopColor="#0f172a" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid vertical={false} stroke="#e2e8f0" strokeDasharray="4 4" />
-          <XAxis dataKey="usageDate" tickLine={false} axisLine={false} tickMargin={10} tickFormatter={shortDate} minTickGap={24} stroke="#64748b" fontSize={12} />
-          <YAxis tickLine={false} axisLine={false} width={48} tickMargin={10} tickFormatter={(v) => formatUsdCompact(Number(v))} stroke="#64748b" fontSize={12} />
-          <ChartTooltip cursor={{ stroke: '#cbd5e1' }} content={<ChartTooltipContent indicator="line" labelFormatter={longDate} formatter={(v) => formatUsd(Number(v))} />} />
-          <Area dataKey="estimatedCostUsd" type="monotone" fill="url(#cost-gradient)" fillOpacity={1} stroke="#0f172a" strokeWidth={2} activeDot={{ r: 4, strokeWidth: 0, fill: '#0f172a' }} />
+          <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#f1f5f9" />
+          <XAxis
+            dataKey="usageDate" tickLine={false} axisLine={false}
+            tickMargin={12} tickFormatter={shortDate} minTickGap={36}
+            stroke="#94a3b8" fontSize={11}
+          />
+          <YAxis
+            tickLine={false} axisLine={false} width={48} tickMargin={8}
+            tickFormatter={(v) => formatUsd(Number(v))} stroke="#94a3b8" fontSize={11}
+          />
+          <ChartTooltip
+            cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '4 4' }}
+            content={
+              <ChartTooltipContent
+                indicator="line"
+                labelFormatter={longDate}
+                formatter={(v) => formatUsdFull(Number(v))}
+              />
+            }
+          />
+          <Area
+            dataKey="estimatedCostUsd" type="natural"
+            fill="url(#cost-fill)" stroke="#0f172a" strokeWidth={2}
+            activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff', fill: '#0f172a' }}
+            dot={false}
+          />
         </AreaChart>
       </ResponsiveContainer>
     </ChartContainer>
   );
 }
 
-function MixChart({ data, title }: { data: Array<{ label: string; value: string; estimatedCostUsd: number }>; title: string; }) {
-  const folded = foldItems(data, 6);
-  const total = sum(folded.map((item) => item.estimatedCostUsd));
-  if (!folded.length) return <ChartEmpty label="No data" />;
-
+function TokenTrendChart({ data }: { data: OverviewPayload['tokenComposition'] }) {
+  if (!data.length) return <EmptyState label="No data" />;
   return (
-    <div className="flex flex-col h-full gap-6 xl:flex-row xl:items-center">
-      <ChartContainer config={{}} className="h-[180px] w-full shrink-0 xl:w-[200px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie data={folded} dataKey="estimatedCostUsd" nameKey="label" innerRadius={60} outerRadius={80} paddingAngle={2} stroke="none">
-              {folded.map((item, idx) => <Cell key={`${title}-${item.value}`} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
-            </Pie>
-            <ChartTooltip content={<ChartTooltipContent formatter={(v) => formatUsd(Number(v))} />} />
-          </PieChart>
-        </ResponsiveContainer>
-      </ChartContainer>
-      <div className="flex w-full flex-col gap-3">
-        {folded.map((item, idx) => (
-          <div key={`${title}-${item.value}`} className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2 overflow-hidden">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }} />
-              <span className="truncate font-medium text-slate-700">{item.label}</span>
-            </div>
-            <div className="text-right ml-4">
-              <span className="font-mono text-slate-900 tabular-nums">{formatUsd(item.estimatedCostUsd)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <ChartContainer config={TOKEN_CONFIG} className="h-[280px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 12, left: 4, right: 12, bottom: 0 }}>
+          <CartesianGrid vertical={false} stroke="#f1f5f9" />
+          <XAxis
+            dataKey="usageDate" tickLine={false} axisLine={false}
+            tickMargin={12} tickFormatter={shortDate} minTickGap={36}
+            stroke="#94a3b8" fontSize={11}
+          />
+          <YAxis
+            tickLine={false} axisLine={false} width={52} tickMargin={8}
+            tickFormatter={(v) => formatCompact(Number(v))} stroke="#94a3b8" fontSize={11}
+          />
+          <ChartTooltip
+            cursor={{ stroke: '#e2e8f0' }}
+            content={
+              <ChartTooltipContent
+                labelFormatter={longDate}
+                formatter={(v) => formatNumber(Number(v))}
+              />
+            }
+          />
+          {TOKEN_SERIES.map((s) => (
+            <Area
+              key={s.key} dataKey={s.key} type="monotone" stackId="tok"
+              fill={s.color} fillOpacity={0.85} stroke={s.color} strokeWidth={0.5}
+            />
+          ))}
+        </AreaChart>
+      </ResponsiveContainer>
+    </ChartContainer>
   );
 }
 
-function FlowChart({ data }: { data: SankeyGraph | undefined }) {
-  const sankeyData = transformSankey(data);
-  if (!sankeyData) return <ChartEmpty label="No data" />;
+function TokenCompositionChart({ data }: { data: OverviewPayload['tokenComposition'] }) {
+  if (!data.length) return <EmptyState label="No data" />;
+  const barW = data.length <= 7 ? 28 : data.length <= 30 ? 14 : 6;
   return (
-    <div className="h-[300px] w-full">
+    <ChartContainer config={TOKEN_CONFIG} className="h-[280px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 12, left: 4, right: 12, bottom: 0 }} barSize={barW}>
+          <CartesianGrid vertical={false} stroke="#f1f5f9" />
+          <XAxis
+            dataKey="usageDate" tickLine={false} axisLine={false}
+            tickMargin={12} tickFormatter={shortDate} minTickGap={36}
+            stroke="#94a3b8" fontSize={11}
+          />
+          <YAxis
+            tickLine={false} axisLine={false} width={52} tickMargin={8}
+            tickFormatter={(v) => formatCompact(Number(v))} stroke="#94a3b8" fontSize={11}
+          />
+          <ChartTooltip
+            cursor={{ fill: '#f8fafc' }}
+            content={
+              <ChartTooltipContent
+                labelFormatter={longDate}
+                formatter={(v) => formatNumber(Number(v))}
+              />
+            }
+          />
+          {TOKEN_SERIES.map((s, i) => (
+            <Bar
+              key={s.key} dataKey={s.key} stackId="tok" fill={s.color}
+              radius={i === TOKEN_SERIES.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartContainer>
+  );
+}
+
+function SankeyNodeLabel({
+  x, y, width, height, payload,
+}: {
+  x: number; y: number; width: number; height: number;
+  payload: { name: string };
+}) {
+  const isLeft = x < 200;
+  return (
+    <text
+      x={isLeft ? x + width + 8 : x - 8}
+      y={y + height / 2}
+      textAnchor={isLeft ? 'start' : 'end'}
+      dominantBaseline="central"
+      className="fill-slate-600 text-[11px]"
+    >
+      {payload.name}
+    </text>
+  );
+}
+
+function FlowChart({ data }: { data?: SankeyGraph }) {
+  const sankeyData = transformSankey(data);
+  if (!sankeyData) return <EmptyState label="No flow data" />;
+  const nodeCount = sankeyData.nodes.length;
+  const height = Math.max(320, nodeCount * 36);
+  return (
+    <div style={{ height }} className="w-full">
       <ResponsiveContainer width="100%" height="100%">
         <Sankey
           data={sankeyData}
-          nodePadding={40}
-          margin={{ left: 10, right: 10, top: 10, bottom: 10 }}
-          link={{ stroke: '#cbd5e1', strokeOpacity: 0.5, fill: 'none' }}
-          node={{ fill: '#0f172a', stroke: '#0f172a', strokeWidth: 1 }}
+          nodePadding={24}
+          nodeWidth={8}
+          margin={{ left: 0, right: 0, top: 8, bottom: 8 }}
+          link={{ stroke: '#94a3b8', strokeOpacity: 0.3, fill: 'none' }}
+          node={<SankeyNodeLabel x={0} y={0} width={0} height={0} payload={{ name: '' }} />}
         >
-          <Tooltip wrapperClassName="minimal-card !border-slate-200 !bg-white !rounded-md" cursor={false}/>
+          <Tooltip
+            wrapperClassName="!rounded-xl !border-slate-200/90 !bg-white/96 !shadow-[0_12px_40px_rgba(0,0,0,0.08)] !backdrop-blur"
+            cursor={false}
+          />
         </Sankey>
       </ResponsiveContainer>
     </div>
   );
 }
 
-function TokensChart({ data }: { data: OverviewPayload['tokenComposition'] }) {
-  if (!data.length) return <ChartEmpty label="No data" />;
+function ProviderBars({
+  data,
+}: {
+  data: Array<{ label: string; estimatedCostUsd: number }>;
+}) {
+  if (!data.length) return <EmptyState label="No data" />;
+  const max = Math.max(...data.map((d) => d.estimatedCostUsd), 1);
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap gap-4">
-        {TOKEN_SERIES.map((series) => (
-          <div key={series.key} className="flex items-center gap-2 text-sm">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: series.color }} />
-            <span className="font-medium text-slate-700">{series.label}</span>
-            <span className="font-mono text-slate-500 tabular-nums ml-1">
-              {formatNumber(sum(data.map((row) => Number(row[series.key] || 0))))}
-            </span>
-          </div>
-        ))}
+    <div>
+      <h3 className="mb-4 text-[13px] font-semibold text-slate-900">Provider Share</h3>
+      <div className="flex flex-col gap-3">
+        {data.map((item) => {
+          const pct = (item.estimatedCostUsd / max) * 100;
+          return (
+            <div key={item.label}>
+              <div className="mb-1 flex items-baseline justify-between text-[12px]">
+                <span className="font-medium text-slate-700">{item.label}</span>
+                <span className="tabular-nums font-medium text-slate-900">{formatUsd(item.estimatedCostUsd)}</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-slate-800 transition-all duration-500"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
       </div>
-      <ChartContainer config={TOKEN_CHART_CONFIG} className="h-[280px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 0, left: 0, right: 0, bottom: 0 }} barSize={16}>
-            <CartesianGrid vertical={false} stroke="#e2e8f0" strokeDasharray="4 4" />
-            <XAxis dataKey="usageDate" tickLine={false} axisLine={false} tickMargin={10} tickFormatter={shortDate} minTickGap={24} stroke="#64748b" fontSize={12} />
-            <YAxis tickLine={false} axisLine={false} width={52} tickMargin={10} tickFormatter={(v) => formatNumber(Math.round(Number(v)))} stroke="#64748b" fontSize={12} />
-            <ChartTooltip cursor={{fill: '#f1f5f9'}} content={<ChartTooltipContent labelFormatter={longDate} formatter={(v) => formatNumber(Number(v))} />} />
-            {TOKEN_SERIES.map((series, i) => (
-              <Bar key={series.key} dataKey={series.key} name={series.label} stackId="tokens" fill={series.color} radius={i === TOKEN_SERIES.length - 1 ? [2, 2, 0, 0] : [0, 0, 0, 0]} />
-            ))}
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartContainer>
     </div>
   );
 }
 
-function RecordsTable({ rows, pagination, onPrev, onNext }: { rows: BreakdownRow[]; pagination: BreakdownPayload['pagination']; onPrev: () => void; onNext: () => void; }) {
-  if (!rows.length) return <ChartEmpty label="No records found" />;
+function DonutSection({
+  title,
+  data,
+  colors,
+  centerLabel,
+}: {
+  title: string;
+  data: Array<{ label: string; value: string; estimatedCostUsd: number; eventCount: number }>;
+  colors: string[];
+  centerLabel: string;
+}) {
+  const sorted = [...data].sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd);
+  const folded = foldItems(sorted, 6);
+  const total = arrSum(folded.map((d) => d.estimatedCostUsd));
+  if (!folded.length) return <EmptyState label="No data" />;
+
   return (
-    <>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-200">
-              {['Date', 'Device', 'Provider', 'Product', 'Channel', 'Model', 'Project', 'Events', 'Input', 'Output', 'Tokens', 'Cost'].map(label => (
-                <th key={label} className="whitespace-nowrap px-4 py-3 font-medium text-slate-500">{label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {rows.map((row, i) => (
-              <tr key={`${row.usage_date}-${row.model}-${row.project}-${i}`} className="hover:bg-slate-50 transition-colors">
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">{row.usage_date}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">{row.device_id}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.provider}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.product}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.channel}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{row.model}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.project}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600 tabular-nums">{formatNumber(row.event_count)}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600 tabular-nums">{formatNumber(sum([row.input_tokens, row.cached_input_tokens, row.cache_write_tokens]))}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600 tabular-nums">{formatNumber(sum([row.output_tokens, row.reasoning_output_tokens]))}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600 tabular-nums">{formatNumber(row.total_tokens)}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-sm font-semibold text-slate-900 tabular-nums">{formatUsd(row.estimated_cost_usd)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-4 flex items-center justify-between px-2">
-        <div className="text-sm text-slate-500">
-          Showing {pagination.offset + 1}-{Math.min(pagination.offset + pagination.limit, pagination.total)} of {formatNumber(pagination.total)}
+    <div>
+      <h3 className="mb-4 text-[13px] font-semibold text-slate-900">{title}</h3>
+      <div className="flex items-center gap-5">
+        {/* Ring */}
+        <div className="relative shrink-0">
+          <ChartContainer config={{}} className="h-[130px] w-[130px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={folded} dataKey="estimatedCostUsd" nameKey="label"
+                  innerRadius="62%" outerRadius="86%" paddingAngle={2} stroke="none"
+                >
+                  {folded.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+                </Pie>
+                <ChartTooltip
+                  content={<ChartTooltipContent formatter={(v) => formatUsdFull(Number(v))} />}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </ChartContainer>
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="text-[13px] font-semibold tabular-nums text-slate-900">{centerLabel}</span>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" className="shadow-sm" disabled={pagination.offset <= 0} onClick={onPrev}>Prev</Button>
-          <Button variant="ghost" className="shadow-sm" disabled={!pagination.hasMore} onClick={onNext}>Next</Button>
+
+        {/* Legend */}
+        <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+          {folded.map((item, i) => {
+            const pct = total > 0 ? (item.estimatedCostUsd / total) * 100 : 0;
+            return (
+              <div key={item.value} className="flex items-center gap-2 text-[12px]">
+                <span
+                  className="h-[7px] w-[7px] shrink-0 rounded-full"
+                  style={{ backgroundColor: colors[i % colors.length] }}
+                />
+                <span className="min-w-0 flex-1 truncate text-slate-500">{item.label}</span>
+                <span className="shrink-0 tabular-nums text-slate-400">{formatPercent(pct)}</span>
+                <span className="shrink-0 font-medium tabular-nums text-slate-900">
+                  {formatUsd(item.estimatedCostUsd)}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
+// ────────────────────────────────────────
+// App
+// ────────────────────────────────────────
+
 export function App() {
-  const [filters, setFilters] = useState<FiltersState>({ range: '30d', deviceId: '', provider: '', product: '', channel: '', model: '' });
-  const [table, setTable] = useState<TableState>({ offset: 0, limit: 15, sort: 'estimated_cost_usd', order: 'desc' });
+  const [filters, setFilters] = useState<FiltersState>({
+    range: '30d', deviceId: '', provider: '', product: '', channel: '', model: '',
+  });
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
-  const [breakdowns, setBreakdowns] = useState<BreakdownPayload | null>(null);
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [tick, setTick] = useState(0);
 
+  const [isDemo, setIsDemo] = useState(false);
+
+  // Fetch data — falls back to demo data when API is unreachable (local dev)
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      setLoading(true); setError(null);
+    (async () => {
+      setLoading(true);
+      setError(null);
       try {
-        const [overviewResult, breakdownResult, healthResult] = await Promise.all([
+        const [ov, hp] = await Promise.all([
           fetchJson<OverviewPayload>(`/api/v1/public/overview?${buildQuery(filters)}`),
-          fetchJson<BreakdownPayload>(`/api/v1/public/breakdowns?${buildBreakdownQuery(filters, table)}`),
-          fetchJson<HealthPayload>('/api/v1/health').catch(() => ({ ok: false, siteId: 'unknown', version: 'unknown' })),
+          fetchJson<HealthPayload>('/api/v1/health').catch(
+            () => ({ ok: false, siteId: 'unknown', version: 'unknown' }),
+          ),
         ]);
         if (cancelled) return;
-        setOverview(overviewResult); setBreakdowns(breakdownResult); setHealth(healthResult);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        setOverview(filters.range === 'month' ? padMonth(ov) : ov);
+        setHealth(hp);
+        setIsDemo(false);
+      } catch {
+        if (cancelled) return;
+        const demo = filters.range === 'month' ? padMonth(DEMO_OVERVIEW) : DEMO_OVERVIEW;
+        setOverview(demo);
+        setHealth(DEMO_HEALTH);
+        setIsDemo(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
-    }
-    void load();
+    })();
     return () => { cancelled = true; };
-  }, [filters, table.offset, table.sort, table.order, refreshKey]);
+  }, [filters, tick]);
 
-  const fOpts = useMemo(() => {
-    const opts = overview?.filters.options;
-    return {
-      devices: opts?.devices ?? [], providers: opts?.providers ?? [],
-      products: opts?.products ?? [], channels: opts?.channels ?? [], models: opts?.models ?? []
-    };
+  // Derived KPIs
+  const kpis = useMemo(() => {
+    if (!overview) return null;
+    const tc = overview.tokenComposition;
+    const totalTokens = arrSum(tc.map((d) => d.totalTokens));
+    const inputTokens = arrSum(tc.map((d) => d.inputTokens));
+    const outputTokens = arrSum(tc.map((d) => d.outputTokens + d.reasoningOutputTokens));
+    const cachedTokens = arrSum(tc.map((d) => d.cachedInputTokens));
+    const denominator = inputTokens + cachedTokens;
+    const cacheHitRate = denominator > 0 ? (cachedTokens / denominator) * 100 : 0;
+    const costPerSession = overview.totalEvents > 0
+      ? overview.totalCostUsd / overview.totalEvents : 0;
+    return { totalTokens, inputTokens, outputTokens, cachedTokens, cacheHitRate, costPerSession };
+  }, [overview]);
+
+  // Filter options
+  const fOpts = useMemo(() => ({
+    devices: overview?.filters.options.devices ?? [],
+    providers: overview?.filters.options.providers ?? [],
+    products: overview?.filters.options.products ?? [],
+    channels: overview?.filters.options.channels ?? [],
+    models: (overview?.filters.options.models ?? []).map((m) => ({ ...m, label: formatModelName(m.label) })),
+  }), [overview]);
+
+  // Token legend
+  const tokenLegend = useMemo(() => {
+    if (!overview) return [];
+    const tc = overview.tokenComposition;
+    return TOKEN_SERIES.map((s) => ({
+      label: s.label,
+      color: s.color,
+      value: formatCompact(arrSum(tc.map((d) => Number(d[s.key] || 0)))),
+    }));
   }, [overview]);
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 min-h-screen">
-      
-      {/* Header */}
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between animate-fade-in">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 border-none m-0 shadow-none">AI Usage</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm shadow-sm text-slate-600">
-            <span className={`h-2 w-2 rounded-full ${health?.ok ? 'bg-green-500' : 'bg-slate-400'}`} />
-            {health?.ok ? health.siteId : 'Loading'}
+    <main className="mx-auto max-w-[1200px] px-4 pb-16 sm:px-6 lg:px-8">
+
+      {/* ── Header ── */}
+      <header className="fade-up relative z-20 flex flex-col gap-4 py-8 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-[22px] font-semibold tracking-tight text-slate-900">AI Usage</h1>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <SegmentedControl
+            value={filters.range === 'month' ? '' : filters.range}
+            options={RANGES}
+            onChange={(v) => setFilters((f) => ({ ...f, range: v }))}
+          />
+          <button
+            onClick={() => setFilters((f) => ({ ...f, range: 'month' }))}
+            className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all duration-150 ${
+              filters.range === 'month'
+                ? 'bg-slate-900 text-white'
+                : 'bg-slate-100/80 text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            This Month
+          </button>
+          <FilterPopover
+            filters={filters}
+            options={fOpts}
+            onChange={(patch) => setFilters((f) => ({ ...f, ...patch }))}
+          />
+          <div className="hidden h-4 w-px bg-slate-200 sm:block" />
+          <div className="hidden items-center gap-1.5 text-[12px] text-slate-400 sm:flex">
+            <span className={`h-1.5 w-1.5 rounded-full ${health?.ok ? (isDemo ? 'bg-amber-400' : 'bg-emerald-500') : 'bg-slate-300'}`} />
+            {isDemo ? 'Demo' : health?.ok ? health.siteId : '\u2026'}
           </div>
-          <Button variant="ghost" onClick={() => setRefreshKey(v => v + 1)} className="shadow-sm">
-            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+          <button
+            onClick={() => setTick((t) => t + 1)}
+            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+            aria-label="Refresh"
+          >
+            <RotateCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
-      </div>
+      </header>
 
-      {/* Filter Bar */}
-      <div className="mb-8 flex flex-wrap items-center gap-3 animate-fade-in delay-100">
-        <span className="flex text-sm font-medium text-slate-500"><Filter className="mr-2 h-4 w-4"/>Filter by</span>
-        <MinimalSelect value={filters.range} placeholder="Time Range" options={RANGE_OPTIONS} onChange={v => setFilters(f => ({ ...f, range: v }))} />
-        <MinimalSelect value={filters.deviceId} placeholder="Device" options={fOpts.devices} onChange={v => setFilters(f => ({ ...f, deviceId: v }))} />
-        <MinimalSelect value={filters.provider} placeholder="Provider" options={fOpts.providers} onChange={v => setFilters(f => ({ ...f, provider: v }))} />
-        <MinimalSelect value={filters.product} placeholder="Product" options={fOpts.products} onChange={v => setFilters(f => ({ ...f, product: v }))} />
-        <MinimalSelect value={filters.model} placeholder="Model" options={fOpts.models} onChange={v => setFilters(f => ({ ...f, model: v }))} />
-      </div>
-
+      {/* ── Content ── */}
       {loading && !overview ? (
-        <div className="flex justify-center py-12"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-t-2 border-slate-900" /></div>
+        <div className="grid gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={`sa-${i}`} className="card px-5 py-5">
+                <Skeleton className="mb-3 h-2.5 w-14" />
+                <Skeleton className="h-6 w-20" />
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={`sb-${i}`} className="card px-5 py-5">
+                <Skeleton className="mb-3 h-2.5 w-14" />
+                <Skeleton className="h-6 w-20" />
+              </div>
+            ))}
+          </div>
+          <div className="card p-6"><Skeleton className="h-[280px]" /></div>
+          <div className="card p-6"><Skeleton className="h-[280px]" /></div>
+        </div>
       ) : error ? (
-        <div className="minimal-card flex h-64 flex-col items-center justify-center p-8 text-center text-red-600">
-          <Database className="h-8 w-8 mb-3 opacity-50" />
-          <div className="text-sm font-medium">{error}</div>
+        <div className="card flex min-h-[320px] flex-col items-center justify-center p-8">
+          <div className="mb-1.5 text-[13px] text-slate-400">Failed to load data</div>
+          <div className="text-[13px] text-red-500/80">{error}</div>
         </div>
       ) : (
-        <div className="grid gap-6">
-          
-          {/* KPIs */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-            <SimpleKpiCard label="Cost" value={formatUsd(overview?.totalCostUsd ?? 0)} icon={BarChart2} />
-            <SimpleKpiCard label="Events" value={formatNumber(overview?.totalEvents ?? 0)} icon={Zap} />
-            <SimpleKpiCard label="Days" value={formatNumber(overview?.activeDays ?? 0)} icon={Calendar} />
-            <SimpleKpiCard label="Avg / Day" value={formatUsd(overview?.averageDailyCostUsd ?? 0)} icon={BarChart2} />
+        <div className="grid gap-4">
+
+          {/* ── KPI Row 1 ── */}
+          <div
+            className="fade-up grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+            style={{ animationDelay: '50ms' }}
+          >
+            <div className="card">
+              <KpiCard label="Estimated Cost" value={formatUsd(overview?.totalCostUsd ?? 0)} highlight />
+            </div>
+            <div className="card">
+              <KpiCard label="Total Tokens" value={formatCompact(kpis?.totalTokens ?? 0)} />
+            </div>
+            <div className="card">
+              <KpiCard label="Input Tokens" value={formatCompact(kpis?.inputTokens ?? 0)} />
+            </div>
+            <div className="card">
+              <KpiCard label="Output Tokens" value={formatCompact(kpis?.outputTokens ?? 0)} />
+            </div>
+            <div className="card">
+              <KpiCard label="Cached Tokens" value={formatCompact(kpis?.cachedTokens ?? 0)} />
+            </div>
           </div>
 
-          {/* Cost Chart */}
-          <div className="minimal-card p-6 animate-fade-in delay-100">
-            <h2 className="mb-6 text-lg font-semibold tracking-tight text-slate-900">Cost Trend</h2>
-            <ChartBoundary title="Cost">
-              <CostChart data={overview?.dailyTrend ?? []} />
+          {/* ── KPI Row 2 ── */}
+          <div
+            className="fade-up grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+            style={{ animationDelay: '100ms' }}
+          >
+            <div className="card">
+              <KpiCard
+                label="Active Days"
+                value={String(overview?.activeDays ?? 0)}
+                suffix={` / ${overview?.totalDays ?? 0}`}
+              />
+            </div>
+            <div className="card">
+              <KpiCard label="Sessions" value={formatNumber(overview?.totalEvents ?? 0)} />
+            </div>
+            <div className="card">
+              <KpiCard label="Cost / Session" value={formatUsd(kpis?.costPerSession ?? 0)} />
+            </div>
+            <div className="card">
+              <KpiCard label="Avg Daily Cost" value={formatUsd(overview?.averageDailyCostUsd ?? 0)} />
+            </div>
+            <div className="card">
+              <KpiCard label="Cache Hit Rate" value={formatPercent(kpis?.cacheHitRate ?? 0)} />
+            </div>
+          </div>
+
+          {/* ── Cost Trend ── */}
+          <div className="card fade-up p-6" style={{ animationDelay: '150ms' }}>
+            <SectionHeader title="Cost Trend" stat={formatUsd(overview?.totalCostUsd ?? 0)} />
+            <ChartBoundary name="Cost Trend">
+              <CostTrendChart data={overview?.dailyTrend ?? []} />
             </ChartBoundary>
           </div>
 
-          {/* Model / Flow Row */}
-          <div className="grid gap-6 lg:grid-cols-3">
-            <div className="minimal-card p-6 lg:col-span-1 animate-fade-in delay-200">
-              <h2 className="mb-6 text-lg font-semibold tracking-tight text-slate-900">Model Proportions</h2>
-              <ChartBoundary title="Model mix">
-                <MixChart data={overview?.modelCostShare ?? []} title="model" />
-              </ChartBoundary>
-            </div>
-            <div className="minimal-card p-6 lg:col-span-2 animate-fade-in delay-200">
-              <h2 className="mb-6 text-lg font-semibold tracking-tight text-slate-900">Token Flow</h2>
-              <ChartBoundary title="Flow">
+          {/* ── Token Trend ── */}
+          <div className="card fade-up p-6" style={{ animationDelay: '200ms' }}>
+            <SectionHeader title="Token Trend" stat={formatCompact(kpis?.totalTokens ?? 0)} />
+            <ChartBoundary name="Token Trend">
+              <TokenTrendChart data={overview?.tokenComposition ?? []} />
+            </ChartBoundary>
+            <ChartLegend items={tokenLegend} />
+          </div>
+
+          {/* ── Token Composition ── */}
+          <div className="card fade-up p-6" style={{ animationDelay: '250ms' }}>
+            <SectionHeader title="Token Composition" />
+            <ChartBoundary name="Token Composition">
+              <TokenCompositionChart data={overview?.tokenComposition ?? []} />
+            </ChartBoundary>
+            <ChartLegend items={tokenLegend} />
+          </div>
+
+          {/* ── Flow & Share ── */}
+          <div className="fade-up grid gap-4 lg:grid-cols-5" style={{ animationDelay: '300ms' }}>
+            <div className="card p-6 lg:col-span-3">
+              <SectionHeader title="Token Flow" />
+              <ChartBoundary name="Token Flow">
                 <FlowChart data={overview?.sankey} />
               </ChartBoundary>
             </div>
-          </div>
-
-          {/* Tokens Stacked Bar */}
-          <div className="minimal-card p-6 animate-fade-in delay-300">
-            <h2 className="mb-6 text-lg font-semibold tracking-tight text-slate-900">Token Composition</h2>
-            <ChartBoundary title="Tokens">
-              <TokensChart data={overview?.tokenComposition ?? []} />
-            </ChartBoundary>
-          </div>
-
-          {/* Table */}
-          <div className="minimal-card p-6 animate-fade-in delay-300">
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-              <h2 className="text-lg font-semibold tracking-tight text-slate-900">Records</h2>
-              <div className="flex gap-2">
-                <Select value={table.sort} onChange={(e) => setTable(t => ({ ...t, sort: e.target.value, offset: 0 }))}>
-                  <option value="estimated_cost_usd">Sort by Cost</option>
-                  <option value="event_count">Sort by Events</option>
-                  <option value="total_tokens">Sort by Tokens</option>
-                  <option value="usage_date">Sort by Date</option>
-                </Select>
-                <Button variant="ghost" onClick={() => setTable(t => ({ ...t, order: t.order === 'desc' ? 'asc' : 'desc', offset: 0 }))} className="shadow-sm w-9 px-0">
-                  {table.order === 'desc' ? '↓' : '↑'}
-                </Button>
-              </div>
+            <div className="card flex flex-col p-6 lg:col-span-2">
+              <ChartBoundary name="Share">
+                <div className="flex flex-1 flex-col">
+                  <DonutSection
+                    title="Provider Share"
+                    data={(overview?.filters.options.providers ?? []).map((p) => ({
+                      value: p.value,
+                      label: p.label,
+                      estimatedCostUsd: p.estimatedCostUsd,
+                      eventCount: p.eventCount,
+                    }))}
+                    colors={['#0f172a', '#475569', '#94a3b8', '#cbd5e1']}
+                    centerLabel={formatUsd(overview?.totalCostUsd ?? 0)}
+                  />
+                  <div className="my-5 border-t border-slate-100" />
+                  <DonutSection
+                    title="Model Share"
+                    data={(overview?.modelCostShare ?? []).map((m) => ({ ...m, label: formatModelName(m.label) }))}
+                    colors={CHART_COLORS}
+                    centerLabel={formatUsd(overview?.totalCostUsd ?? 0)}
+                  />
+                  <div className="my-5 border-t border-slate-100" />
+                  <DonutSection
+                    title="Channel Share"
+                    data={overview?.channelCostShare ?? []}
+                    colors={['#1e3a5f', '#3b6fa0', '#6b9fd0', '#a8c5e2', '#cddff0', '#e8f0f8']}
+                    centerLabel={formatNumber(overview?.totalEvents ?? 0)}
+                  />
+                </div>
+              </ChartBoundary>
             </div>
-            <ChartBoundary title="Records">
-              <RecordsTable
-                rows={breakdowns?.data ?? []}
-                pagination={breakdowns?.pagination ?? { total: 0, limit: table.limit, offset: table.offset, hasMore: false }}
-                onPrev={() => setTable(t => ({ ...t, offset: Math.max(0, t.offset - t.limit) }))}
-                onNext={() => setTable(t => ({ ...t, offset: t.offset + t.limit }))}
-              />
-            </ChartBoundary>
           </div>
 
         </div>
       )}
+
+      {/* ── Footer ── */}
+      <footer className="fade-up mt-16 border-t border-slate-100 pb-10 pt-8">
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex items-center gap-3 text-[12px] text-slate-400">
+            <span className="font-medium text-slate-500">AI Usage</span>
+            {health?.version && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                v{health.version}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-4 text-[11px] text-slate-300">
+            <a
+              href="https://github.com/ennann/aiusage"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-slate-400 transition-colors hover:text-slate-600"
+            >
+              <Github className="h-3.5 w-3.5" />
+              <span>Source</span>
+            </a>
+            <span className="h-3 w-px bg-slate-200" />
+            <span className="flex items-center gap-1">
+              Made with <Heart className="h-3 w-3 fill-red-300 text-red-300" /> by{' '}
+              <a
+                href="https://x.com/qingnianxiaozhe"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-400 transition-colors hover:text-slate-600"
+              >
+                qingnianxiaozhe
+              </a>
+            </span>
+          </div>
+        </div>
+      </footer>
     </main>
   );
 }
