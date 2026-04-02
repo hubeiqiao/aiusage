@@ -61,86 +61,41 @@ graph LR
 
 ## Quickstart
 
-### Local reports (no server needed)
+### Deploy with your AI agent
 
-```bash
-npm i -g @aiusage/controller
+AIUsage provides [skill files](./skills/) that any AI coding agent can follow to deploy the full stack:
 
-aiusage report --range 7d
-```
+| Skill | What it does |
+|-------|-------------|
+| [`skills/deploy-server.md`](./skills/deploy-server.md) | Deploy Cloudflare Worker + D1 + Dashboard |
+| [`skills/setup-controller.md`](./skills/setup-controller.md) | Install CLI and connect a device |
 
-### Deploy your own server
+Just tell your AI agent:
 
-Prerequisites: [Node.js](https://nodejs.org/) >= 18, [pnpm](https://pnpm.io/), a [Cloudflare](https://dash.cloudflare.com/) account
+> Read `skills/deploy-server.md` and help me deploy AIUsage.
+
+### Deploy manually
 
 ```bash
 git clone https://github.com/ennann/aiusage.git
 cd aiusage && pnpm install
 npx wrangler login
-pnpm setup
+pnpm setup                # interactive one-click wizard
 ```
 
-`pnpm setup` walks you through everything — creates the D1 database, generates secrets, builds, and deploys. At the end it prints your dashboard URL, `SITE_ID`, and `ENROLL_TOKEN`.
-
-<details>
-<summary>Manual deployment</summary>
-
-```bash
-npx wrangler d1 create aiusage-db
-# Copy database_id into packages/worker/wrangler.jsonc
-
-npx wrangler d1 migrations apply aiusage-db --remote
-
-npx wrangler secret put SITE_ID
-npx wrangler secret put ENROLL_TOKEN
-npx wrangler secret put DEVICE_TOKEN_SECRET
-npx wrangler secret put PROJECT_NAME_SALT
-
-pnpm build
-cd packages/worker && npx wrangler deploy
-```
-
-See `packages/worker/wrangler.jsonc.example` for the config template.
-</details>
-
-### Connect a device
+### Local reports (no server needed)
 
 ```bash
 npm i -g @aiusage/controller
-
-aiusage enroll \
-  --server https://your-worker.example.com \
-  --site-id <SITE_ID> \
-  --enroll-token <ENROLL_TOKEN> \
-  --device-name "My MacBook"
-
-aiusage sync --today
-aiusage schedule        # auto-sync every 5 min
+aiusage report --range 7d
 ```
 
-Repeat on every machine. Each device gets its own secure token.
+## Docs
 
-## CLI
-
-| Command | Description |
-|---------|-------------|
-| `aiusage report [--range 7d\|1m\|3m\|all]` | Local usage report with cost estimates |
-| `aiusage scan [--date YYYY-MM-DD]` | Scan a single day |
-| `aiusage sync [--today] [--lookback N]` | Upload data to server |
-| `aiusage schedule [on\|off\|status]` | Auto-sync (default every 5 min) |
-| `aiusage enroll` | Register this device |
-| `aiusage doctor` | Diagnostic checks |
-| `aiusage config set <key> <value>` | Update local settings |
-
-## Privacy
-
-Only aggregated token counts are uploaded — never conversation content. Project names on the public dashboard can be:
-
-| Mode | Behavior |
-|------|----------|
-| `masked` (default) | Stable pseudonyms like `Project A1F4` via HMAC |
-| `hidden` | Project dimension not shown |
-| `plain` | Real names (private deployments only) |
+| Document | Description |
+|----------|-------------|
+| [**Deployment Guide**](./docs/deployment-guide.md) | Full setup walkthrough, CLI reference, API docs |
+| [**Controller README**](./packages/controller/README.md) | CLI tool details and all commands |
 
 ## Project Structure
 
@@ -151,27 +106,9 @@ aiusage/
 │   ├── worker/        # Cloudflare Worker + D1 API
 │   ├── dashboard/     # React SPA analytics UI
 │   └── shared/        # Shared types and constants
-├── scripts/
-│   └── setup.mjs      # One-click deployment wizard
-└── docs/
-    └── technical-design.md
-```
-
-## Docs
-
-- [**Technical Design**](./docs/design-docs/technical-design.md)
-- [**Controller README**](./packages/controller/README.md)
-
-## Development
-
-```bash
-pnpm install
-pnpm build
-pnpm lint
-
-cd packages/worker
-npx wrangler d1 migrations apply aiusage-db --local
-npx wrangler dev
+├── skills/            # AI agent deployment skills
+├── scripts/           # One-click deployment wizard
+└── docs/              # Guides and references
 ```
 
 ## License
