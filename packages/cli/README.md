@@ -32,16 +32,19 @@ aiusage --help
 Local usage report. No cloud upload required.
 
 ```bash
-aiusage report --range 7d
-aiusage report --range 1m
-aiusage report --range 3m
-aiusage report --range all
-aiusage report --range 7d --json
+aiusage report                          # default: last 7 days, English, compact
+aiusage report --range 1m               # last 30 days
+aiusage report --range 3m               # last 90 days
+aiusage report --range all              # all history
+aiusage report --detail                 # show all columns, top models, pricing notes
+aiusage report --lang zh                # Chinese output
+aiusage report --no-emoji               # disable emoji in title
+aiusage report --json                   # JSON output
 ```
 
 Reads data from `~/.claude/projects` (Claude Code) and `~/.codex` (Codex).
 
-The report includes events, token breakdowns (input / cache read / cache write / output / reasoning), grouped totals by source, daily trend, top models, and estimated USD cost based on public pricing.
+**Compact mode** (default) shows Sources and Daily tables with merged Cache column and 2-decimal cost. **Detail mode** (`--detail`) expands all columns (CacheRead, CacheWrite, Reasoning), adds Top Models and Pricing Notes sections, and shows 4-decimal cost.
 
 ### scan
 
@@ -122,10 +125,14 @@ aiusage doctor
 Manage local settings.
 
 ```bash
+aiusage config set lang zh                              # default language: en or zh
+aiusage config set emoji false                          # disable emoji in report title
 aiusage config set device.alias "MacBook Pro 工作机"
 aiusage config set privacy.projectVisibility masked
 aiusage config set project.alias /Users/me/Projects/MyApp MyApp
 ```
+
+CLI flags (`--lang`, `--no-emoji`) override config values for a single run.
 
 ## Configuration
 
