@@ -1,151 +1,159 @@
-# AIUsage
+<p align="center"><code>npm i -g @aiusage/controller</code></p>
 
-Track and visualize your AI coding assistant token usage across Claude Code and Codex.
+<p align="center">
+  <strong>AIUsage</strong> tracks token usage and costs across all your AI tools and devices,<br>
+  syncs to your own Cloudflare Worker, and visualizes everything on a public dashboard.
+</p>
 
-AIUsage collects local token statistics, syncs them to a self-hosted Cloudflare Worker, and displays usage trends on a public dashboard — all without sending any conversation content.
+<p align="center">
+  <a href="./README.zh-CN.md">中文</a> | English
+</p>
 
-## Features
+<p align="center">
+  <a href="https://www.npmjs.com/package/@aiusage/controller"><img src="https://img.shields.io/npm/v/@aiusage/controller?label=npm&color=cb0000&logo=npm" alt="npm" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
+  <a href="https://workers.cloudflare.com"><img src="https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white" alt="Cloudflare Workers" /></a>
+  <a href="https://developers.cloudflare.com/d1"><img src="https://img.shields.io/badge/Cloudflare-D1-F38020?logo=cloudflare&logoColor=white" alt="Cloudflare D1" /></a>
+  <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React" /></a>
+  <a href="https://pnpm.io"><img src="https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white" alt="pnpm" /></a>
+  <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></a>
+</p>
 
-- **Local scanning** — Parse Claude Code and Codex session logs to extract token usage
-- **Usage reports** — Terminal reports with daily trends, model breakdowns, and cost estimates
-- **Cloud sync** — Upload aggregated stats to your own Cloudflare Worker + D1 database
-- **Public dashboard** — Read-only web UI showing usage trends, top models, and costs
-- **Privacy first** — Only token counts are uploaded; project names can be masked or hidden
-- **Multi-device** — Register multiple machines with device-scoped tokens
-- **Auto scheduling** — Set up periodic sync via launchd (macOS) or cron (Linux)
+---
 
-## Architecture
+## What is AIUsage?
+
+A self-hosted, privacy-first system for tracking how much you spend on AI coding tools — across every device you own.
+
+- **Scans locally** — reads token usage from AI tool session logs, never touches conversation content
+- **Syncs across devices** — every machine enrolls with its own secure token, data merges on your Worker
+- **Visualizes costs** — public dashboard with trends, model breakdowns, cost per session, and more
+- **You own the data** — deploys to your Cloudflare account (free tier is enough), no third-party services
 
 ```
 ┌─────────────┐         ┌──────────────────────┐
 │  Controller  │── sync ──▶  Cloudflare Worker  │
-│  (CLI tool)  │         │  + D1 Database       │
+│   (device)   │         │  + D1 Database       │
 └─────────────┘         └──────────┬───────────┘
                                    │
-                            public API
-                                   │
-                        ┌──────────▼───────────┐
-                        │     Dashboard        │
-                        │  (read-only web UI)  │
-                        └──────────────────────┘
+┌─────────────┐              public API
+│  Controller  │── sync ──▶        │
+│   (device)   │         ┌─────────▼──────────┐
+└─────────────┘         │     Dashboard       │
+                        │  (read-only web UI) │
+                        └─────────────────────┘
 ```
 
-- **Controller** (`@aiusage/controller`) — Local CLI for scanning, reporting, and syncing
-- **Worker** (`packages/worker`) — Cloudflare Worker handling ingestion, cost calculation, and public API
-- **Shared** (`packages/shared`) — Common types and constants
+## Quickstart
 
-## Quick Start
-
-### Local reporting (no server needed)
+### Local reports (no server needed)
 
 ```bash
-npm install -g @aiusage/controller
+npm i -g @aiusage/controller
 
 aiusage report --range 7d
-aiusage scan --date 2026-03-31
 ```
 
 ### Deploy your own server
 
-Prerequisites: [Node.js](https://nodejs.org/) >= 18, [pnpm](https://pnpm.io/), [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/)
+Prerequisites: [Node.js](https://nodejs.org/) >= 18, [pnpm](https://pnpm.io/), a [Cloudflare](https://dash.cloudflare.com/) account
 
 ```bash
-# Clone and install
 git clone https://github.com/ennann/aiusage.git
-cd aiusage
-pnpm install
-
-# Login to Cloudflare
+cd aiusage && pnpm install
 npx wrangler login
+pnpm setup
+```
 
-# Create D1 database
+`pnpm setup` walks you through everything — creates the D1 database, generates secrets, builds, and deploys. At the end it prints your dashboard URL, `SITE_ID`, and `ENROLL_TOKEN`.
+
+<details>
+<summary>Manual deployment</summary>
+
+```bash
 npx wrangler d1 create aiusage-db
-# Copy the database_id into packages/worker/wrangler.jsonc
+# Copy database_id into packages/worker/wrangler.jsonc
 
-# Run database migration
 npx wrangler d1 migrations apply aiusage-db --remote
 
-# Set secrets
 npx wrangler secret put SITE_ID
 npx wrangler secret put ENROLL_TOKEN
 npx wrangler secret put DEVICE_TOKEN_SECRET
 npx wrangler secret put PROJECT_NAME_SALT
 
-# Deploy
-cd packages/worker
-npx wrangler deploy
+pnpm build
+cd packages/worker && npx wrangler deploy
 ```
 
-### Connect your device
+See `packages/worker/wrangler.jsonc.example` for the config template.
+</details>
+
+### Connect a device
 
 ```bash
-aiusage init --server https://your-worker.example.com --site-id <SITE_ID>
-aiusage enroll --enroll-token <ENROLL_TOKEN> --device-name "My MacBook"
-aiusage sync
-aiusage schedule on --every 1h
+npm i -g @aiusage/controller
+
+aiusage enroll \
+  --server https://your-worker.example.com \
+  --site-id <SITE_ID> \
+  --enroll-token <ENROLL_TOKEN> \
+  --device-name "My MacBook"
+
+aiusage sync --today
+aiusage schedule        # auto-sync every 5 min
 ```
 
-## CLI Commands
+Repeat on every machine. Each device gets its own secure token.
+
+## CLI
 
 | Command | Description |
 |---------|-------------|
-| `aiusage report [--range 7d\|1m\|3m\|all] [--json]` | Local usage report |
-| `aiusage scan [--date YYYY-MM-DD] [--json]` | Scan a single day |
-| `aiusage init --server URL --site-id ID` | Initialize config |
-| `aiusage health` | Test server connectivity |
-| `aiusage enroll --enroll-token TOKEN` | Register device |
-| `aiusage sync [--lookback N]` | Upload data to server |
-| `aiusage schedule [on\|off] [--every 1h]` | Manage auto sync |
-| `aiusage doctor` | Run diagnostic checks |
+| `aiusage report [--range 7d\|1m\|3m\|all]` | Local usage report with cost estimates |
+| `aiusage scan [--date YYYY-MM-DD]` | Scan a single day |
+| `aiusage sync [--today] [--lookback N]` | Upload data to server |
+| `aiusage schedule [on\|off\|status]` | Auto-sync (default every 5 min) |
+| `aiusage enroll` | Register this device |
+| `aiusage doctor` | Diagnostic checks |
 | `aiusage config set <key> <value>` | Update local settings |
-
-## API Endpoints
-
-### Device API (authenticated)
-
-- `GET /api/v1/health` — Connectivity check
-- `POST /api/v1/enroll` — Register a new device
-- `POST /api/v1/ingest/daily` — Upload daily usage data
-
-### Public API (read-only, CORS enabled)
-
-- `GET /api/v1/public/overview?range=7d` — Summary and daily trend
-- `GET /api/v1/public/breakdowns?range=7d&limit=50` — Detailed breakdowns with pagination
 
 ## Privacy
 
-Project names are sensitive. AIUsage supports three display modes for the public dashboard:
+Only aggregated token counts are uploaded — never conversation content. Project names on the public dashboard can be:
 
 | Mode | Behavior |
 |------|----------|
 | `masked` (default) | Stable pseudonyms like `Project A1F4` via HMAC |
 | `hidden` | Project dimension not shown |
-| `plain` | Real project names (private deployments only) |
-
-Set via `PUBLIC_PROJECT_VISIBILITY` in `wrangler.jsonc`.
+| `plain` | Real names (private deployments only) |
 
 ## Project Structure
 
 ```
 aiusage/
 ├── packages/
-│   ├── controller/    # CLI tool (published as @aiusage/controller)
-│   ├── worker/        # Cloudflare Worker + D1
+│   ├── controller/    # CLI tool (@aiusage/controller on npm)
+│   ├── worker/        # Cloudflare Worker + D1 API
+│   ├── dashboard/     # React SPA analytics UI
 │   └── shared/        # Shared types and constants
-├── docs/
-│   └── technical-design.md
-├── turbo.json
-└── pnpm-workspace.yaml
+├── scripts/
+│   └── setup.mjs      # One-click deployment wizard
+└── docs/
+    └── technical-design.md
 ```
+
+## Docs
+
+- [**Technical Design**](./docs/design-docs/technical-design.md)
+- [**Controller README**](./packages/controller/README.md)
 
 ## Development
 
 ```bash
 pnpm install
-pnpm build        # Build all packages
-pnpm lint         # Type check all packages
+pnpm build
+pnpm lint
 
-# Local worker development
 cd packages/worker
 npx wrangler d1 migrations apply aiusage-db --local
 npx wrangler dev
