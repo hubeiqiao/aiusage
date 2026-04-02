@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { scanDate, scanDates } from './scan.js';
-import { buildLocalReport, parseReportRange, renderLocalReport } from './report.js';
+import { buildLocalReport, parseReportRange } from './report.js';
+import { renderReport } from './render.js';
 import {
   detectDeviceId,
   getConfigPath,
@@ -119,7 +120,13 @@ async function runReport(flags: Record<string, string | boolean>) {
     return;
   }
 
-  console.log(renderLocalReport(report));
+  const lang = (typeof flags.lang === 'string' ? flags.lang : config.lang) || 'en';
+  if (lang !== 'en' && lang !== 'zh') throw new Error('--lang only supports en or zh');
+
+  const emoji = flags['no-emoji'] === true ? false : (config.emoji ?? true);
+  const detail = flags.detail === true;
+
+  console.log(renderReport(report, { lang, emoji, detail }));
 }
 
 function fmt(n: number): string {
@@ -313,7 +320,7 @@ function printHelp() {
   console.log('  aiusage enroll --server URL --site-id ID --enroll-token TOKEN [--device-id ID] [--device-name NAME]');
   console.log('  aiusage sync [--date YYYY-MM-DD] [--from YYYY-MM-DD [--to YYYY-MM-DD]] [--lookback N] [--today] [--server URL]');
   console.log('  aiusage scan [--date YYYY-MM-DD] [--json]');
-  console.log('  aiusage report [--range 7d|1m|3m|all] [--json]');
+  console.log('  aiusage report [--range 7d|1m|3m|all] [--detail] [--lang en|zh] [--no-emoji] [--json]');
   console.log('  aiusage schedule [on|off|status] [--every 5m]');
   console.log('  aiusage doctor');
   console.log('  aiusage config set <key> <value...>');
