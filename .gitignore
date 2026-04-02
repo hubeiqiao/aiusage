@@ -11,6 +11,7 @@ dist/
 # Cloudflare Workers
 .wrangler/
 .dev.vars
+packages/worker/wrangler.jsonc
 
 # Environment & Secrets
 .env

@@ -1,14 +1,14 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "aiusage",
+  "name": "your-worker-name",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-01",
   "compatibility_flags": ["nodejs_compat"],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "aiusage-db",
-      "database_id": "<YOUR_D1_DATABASE_ID>"
+      "database_name": "your-d1-database-name",
+      "database_id": "your-d1-database-id"
     }
   ],
   // 部署时通过 wrangler secret put 设置:
