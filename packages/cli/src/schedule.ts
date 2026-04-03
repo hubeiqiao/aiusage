@@ -16,6 +16,9 @@ export interface ScheduleStatus {
   interval?: number;
   intervalLabel?: string;
   path?: string;
+  command?: string;
+  logPath?: string;
+  includeToday?: boolean;
 }
 
 export function parseInterval(value: string): { seconds: number; label: string } {
@@ -126,11 +129,21 @@ async function getLaunchdStatus(): Promise<ScheduleStatus> {
     const content = await readFile(PLIST_PATH, 'utf-8');
     const match = content.match(/<key>StartInterval<\/key>\s*<integer>(\d+)<\/integer>/);
     const interval = match ? parseInt(match[1], 10) : undefined;
+    // 提取 ProgramArguments 中的命令
+    const argMatches = [...content.matchAll(/<string>([^<]+)<\/string>/g)].map(m => m[1]);
+    const command = argMatches.length > 0 ? argMatches.join(' ') : undefined;
+    const includeToday = content.includes('--today');
+    // 提取日志路径
+    const logMatch = content.match(/<key>StandardOutPath<\/key>\s*<string>([^<]+)<\/string>/);
+    const logPath = logMatch?.[1];
     return {
       enabled: true,
       interval,
       intervalLabel: interval ? formatInterval(interval) : undefined,
       path: PLIST_PATH,
+      command,
+      logPath,
+      includeToday,
     };
   } catch {
     return { enabled: false };
@@ -195,10 +208,20 @@ async function getCronStatus(): Promise<ScheduleStatus> {
     const line = stdout.split('\n').find((l) => l.includes(CRON_MARKER));
     if (!line) return { enabled: false };
     const interval = cronToSeconds(line);
+    const includeToday = line.includes('--today');
+    // cron 行格式: */5 * * * * /path/to/node /path/to/aiusage sync --today >> /log 2>&1 # marker
+    const logMatch = line.match(/>>\s*(\S+)/);
+    const logPath = logMatch?.[1];
+    // 提取 cron 表达式后的命令部分
+    const cmdMatch = line.match(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+(.+?)(?:\s*>>)/);
+    const command = cmdMatch?.[1];
     return {
       enabled: true,
       interval,
       intervalLabel: interval ? formatInterval(interval) : undefined,
+      command,
+      logPath,
+      includeToday,
     };
   } catch {
     return { enabled: false };

@@ -7,6 +7,7 @@ import { scanKimiDates } from './scanners/kimi.js';
 import { scanAmpDates } from './scanners/amp.js';
 import { scanDroidDates } from './scanners/droid.js';
 import { scanOpencodeDates } from './scanners/opencode.js';
+import { scanPiDates } from './scanners/pi.js';
 
 import type { IngestBreakdown } from '@aiusage/shared';
 
@@ -50,6 +51,7 @@ export async function scanDates(targetDates: string[], options: ScanOptions = {}
     scanAmpDates(uniqueDates, undefined, options.projectAliases),
     scanDroidDates(uniqueDates, undefined, options.projectAliases),
     scanOpencodeDates(uniqueDates, undefined, options.projectAliases),
+    scanPiDates(uniqueDates, undefined, options.projectAliases),
   ];
 
   const results = await Promise.all(scanners);

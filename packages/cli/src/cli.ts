@@ -316,10 +316,13 @@ async function runSchedule(sub: string | undefined, flags: Record<string, string
     if (status.enabled) {
       console.log(`状态: 已启用`);
       if (status.intervalLabel) console.log(`间隔: 每 ${status.intervalLabel}`);
+      console.log(`含今日: ${status.includeToday ? '是' : '否'}`);
+      if (status.command) console.log(`命令: ${status.command}`);
       if (status.path) console.log(`配置: ${status.path}`);
+      if (status.logPath) console.log(`日志: ${status.logPath}`);
     } else {
       console.log('状态: 未启用');
-      console.log('启用: aiusage schedule [--every 5m]');
+      console.log('启用: aiusage schedule on [--every 5m]');
     }
   }
 }
