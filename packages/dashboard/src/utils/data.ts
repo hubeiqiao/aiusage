@@ -1,7 +1,6 @@
 import type { SankeyGraph } from '@aiusage/shared';
 import type { OverviewPayload, FiltersState } from '../hooks/use-overview';
 import { arrSum } from './format';
-import { providerLabel } from '../constants';
 
 /** Get all YYYY-MM-DD dates for the current month (1st to last day). */
 export function currentMonthDates(): string[] {
@@ -125,7 +124,7 @@ export function transformSankey(input?: SankeyGraph) {
   }
 
   const nodeList = nodes.map((n) => ({
-    name: n.id.startsWith('provider:') ? providerLabel(n.label || n.id) : (n.label || n.id),
+    name: n.label || n.id,
   }));
   const idToIdx = new Map(nodes.map((n, i) => [n.id, i]));
 

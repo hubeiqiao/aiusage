@@ -148,18 +148,16 @@ export async function handleOverview(url: URL, env: Env): Promise<Response> {
     }>(),
     env.DB.prepare(`
       SELECT
-        b.provider,
-        b.product,
+        b.model,
         b.project,
         COALESCE(SUM(${TOTAL_TOKENS_SQL}), 0) AS total_tokens
       FROM daily_usage_breakdown b
       ${where.whereClause}
-      GROUP BY b.provider, b.product, b.project
+      GROUP BY b.model, b.project
       HAVING COALESCE(SUM(${TOTAL_TOKENS_SQL}), 0) > 0
-      ORDER BY total_tokens DESC, b.provider ASC, b.product ASC, b.project ASC
+      ORDER BY total_tokens DESC, b.model ASC, b.project ASC
     `).bind(...where.params).all<{
-      provider: string;
-      product: string;
+      model: string;
       project: string;
       total_tokens: number;
     }>(),
@@ -360,32 +358,26 @@ function toFilterKey(column: string): FilterKey {
 }
 
 async function buildSankey(rows: Array<{
-  provider: string;
-  product: string;
+  model: string;
   project: string;
   total_tokens: number;
 }>, env: Env): Promise<{
   nodes: Array<{ id: string; label: string; layer: number; totalTokens: number }>;
   links: Array<{ source: string; target: string; value: number }>;
 }> {
-  const providerTotals = new Map<string, number>();
-  const productTotals = new Map<string, number>();
+  const modelTotals = new Map<string, number>();
   const projectTotals = new Map<string, number>();
-  const leftLinks = new Map<string, number>();
-  const rightLinks = new Map<string, number>();
+  const flowLinks = new Map<string, number>();
 
   for (const row of rows) {
     const value = Number(row.total_tokens ?? 0);
     if (!value) continue;
 
-    providerTotals.set(row.provider, (providerTotals.get(row.provider) ?? 0) + value);
-    productTotals.set(row.product, (productTotals.get(row.product) ?? 0) + value);
+    modelTotals.set(row.model, (modelTotals.get(row.model) ?? 0) + value);
     projectTotals.set(row.project, (projectTotals.get(row.project) ?? 0) + value);
 
-    const leftKey = `${row.provider}\u0000${row.product}`;
-    const rightKey = `${row.product}\u0000${row.project}`;
-    leftLinks.set(leftKey, (leftLinks.get(leftKey) ?? 0) + value);
-    rightLinks.set(rightKey, (rightLinks.get(rightKey) ?? 0) + value);
+    const key = `${row.model}\u0000${row.project}`;
+    flowLinks.set(key, (flowLinks.get(key) ?? 0) + value);
   }
 
   const projectLabels = new Map<string, string>();
@@ -394,44 +386,28 @@ async function buildSankey(rows: Array<{
   }
 
   const nodes = [
-    ...sortedNodeEntries(providerTotals).map(([label, totalTokens]) => ({
-      id: `provider:${label}`,
+    ...sortedNodeEntries(modelTotals).map(([label, totalTokens]) => ({
+      id: `model-${label}`,
       label,
       layer: 0,
       totalTokens,
     })),
-    ...sortedNodeEntries(productTotals).map(([label, totalTokens]) => ({
-      id: `product:${label}`,
-      label,
-      layer: 1,
-      totalTokens,
-    })),
     ...sortedNodeEntries(projectTotals).map(([name, totalTokens]) => ({
-      id: `project:${name}`,
+      id: `project-${name}`,
       label: projectLabels.get(name) ?? name,
-      layer: 2,
+      layer: 1,
       totalTokens,
     })),
   ];
 
-  const links = [
-    ...sortedLinkEntries(leftLinks).map(([key, value]) => {
-      const [provider, product] = key.split('\u0000');
-      return {
-        source: `provider:${provider}`,
-        target: `product:${product}`,
-        value,
-      };
-    }),
-    ...sortedLinkEntries(rightLinks).map(([key, value]) => {
-      const [product, project] = key.split('\u0000');
-      return {
-        source: `product:${product}`,
-        target: `project:${project}`,
-        value,
-      };
-    }),
-  ];
+  const links = sortedLinkEntries(flowLinks).map(([key, value]) => {
+    const [model, project] = key.split('\u0000');
+    return {
+      source: `model-${model}`,
+      target: `project-${project}`,
+      value,
+    };
+  });
 
   return { nodes, links };
 }
