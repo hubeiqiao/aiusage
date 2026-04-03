@@ -148,12 +148,73 @@ function buildPresetDates(range: Exclude<ReportRange, 'all'>): string[] {
 
 async function discoverAllDates(): Promise<string[]> {
   const dates = new Set<string>();
+  const home = homedir();
   await Promise.all([
     discoverClaudeDates(dates),
     discoverCodexDates(dates),
     discoverGeminiDates(dates),
+    discoverGenericJsonlDates(join(home, '.copilot', 'session-state'), dates),
+    discoverGenericJsonlDates(join(home, '.qwen', 'tmp'), dates),
+    discoverGenericJsonlDates(join(home, '.kimi', 'sessions'), dates),
+    discoverGenericJsonDates(join(home, '.local', 'share', 'amp', 'threads'), dates),
+    discoverGenericJsonlDates(join(home, '.factory', 'sessions'), dates),
+    discoverGenericJsonDates(join(home, '.local', 'share', 'opencode'), dates),
+    discoverGenericJsonlDates(join(home, '.pi', 'agent', 'sessions'), dates),
   ]);
   return [...dates].sort();
+}
+
+/** 通用：递归扫描 .jsonl 文件，逐行提取 timestamp */
+async function discoverGenericJsonlDates(baseDir: string, dates: Set<string>): Promise<void> {
+  const files: string[] = [];
+  await walkForFiles(baseDir, '.jsonl', files);
+  for (const filePath of files) {
+    const content = await safeReadUtf8(filePath);
+    if (!content) continue;
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      let record: { timestamp?: string | number };
+      try { record = JSON.parse(line); } catch { continue; }
+      const ts = parseTimestamp(record.timestamp as string | undefined);
+      if (ts) dates.add(toDateKey(ts));
+    }
+  }
+}
+
+/** 通用：递归扫描 .json 文件，从顶层或 messages 提取 timestamp */
+async function discoverGenericJsonDates(baseDir: string, dates: Set<string>): Promise<void> {
+  const files: string[] = [];
+  await walkForFiles(baseDir, '.json', files);
+  for (const filePath of files) {
+    const content = await safeReadUtf8(filePath);
+    if (!content) continue;
+    let data: any;
+    try { data = JSON.parse(content); } catch { continue; }
+    // 顶层 timestamp
+    const topTs = parseTimestamp(data.timestamp ?? data.createTime);
+    if (topTs) dates.add(toDateKey(topTs));
+    // messages 数组
+    const msgs = data.messages ?? data.history ?? [];
+    if (Array.isArray(msgs)) {
+      for (const msg of msgs) {
+        const ts = parseTimestamp(msg.timestamp ?? msg.createTime);
+        if (ts) dates.add(toDateKey(ts));
+      }
+    }
+  }
+}
+
+async function walkForFiles(dir: string, ext: string, result: string[]): Promise<void> {
+  let entries;
+  try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await walkForFiles(fullPath, ext, result);
+    } else if (entry.name.endsWith(ext)) {
+      result.push(fullPath);
+    }
+  }
 }
 
 async function discoverGeminiDates(dates: Set<string>): Promise<void> {
