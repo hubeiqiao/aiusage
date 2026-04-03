@@ -332,10 +332,18 @@ async function runDoctorCommand(flags: Record<string, string | boolean>) {
   const config = await readConfig();
   const lang = (typeof flags.lang === 'string' ? flags.lang : config.lang) || 'en';
   const checks = await runDoctor(lang as 'en' | 'zh');
+
+  let lastGroup = '';
   for (const check of checks) {
+    if (check.group !== lastGroup) {
+      if (lastGroup) console.log('');
+      console.log(`── ${check.group} ──`);
+      lastGroup = check.group;
+    }
     const icon = check.status === 'ok' ? '✓' : check.status === 'warn' ? '⚠' : '✗';
-    console.log(`${icon} ${check.name}: ${check.message}`);
+    console.log(`  ${icon} ${check.name}: ${check.message}`);
   }
+
   const failures = checks.filter((c) => c.status === 'fail');
   if (failures.length > 0) process.exitCode = 1;
 }
