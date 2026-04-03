@@ -12,7 +12,8 @@ import {
 import type { FiltersState, FacetOption } from './hooks/use-overview';
 import { useOverview } from './hooks/use-overview';
 import { ChartBoundary, EmptyState, Skeleton, SectionHeader, ChartLegend } from './components/chart-helpers';
-import { KpiCard } from './components/kpi-card';
+import { KpiCard, CostKpiCard } from './components/kpi-card';
+import { useFetchCnyRate, useCurrencyStore } from './hooks/use-cny-rate';
 import { CostTrendChart } from './components/cost-trend-chart';
 import { TokenTrendChart } from './components/token-trend-chart';
 import { TokenCompositionChart } from './components/token-composition-chart';
@@ -176,6 +177,8 @@ export function App() {
   });
 
   const { overview, health, kpis, fOpts, loading, error, isDemo, refresh } = useOverview(filters);
+  useFetchCnyRate();
+  useCurrencyStore(); // subscribe to re-render on toggle
 
   // Theme
   const [theme, setThemeState] = useState<ThemeMode>(getStoredTheme);
@@ -322,7 +325,7 @@ export function App() {
             style={{ animationDelay: '50ms' }}
           >
             <div className="card col-span-2 sm:col-span-1">
-              <KpiCard label={t.estimatedCost} value={formatUsd(overview?.totalCostUsd ?? 0)} highlight />
+              <CostKpiCard label={t.estimatedCost} value={formatUsd(overview?.totalCostUsd ?? 0)} />
             </div>
             <div className="card">
               <KpiCard label={t.totalTokens} value={formatCompact(kpis?.totalTokens ?? 0, locale)} />

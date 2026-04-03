@@ -10,9 +10,18 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8787',
-      '/pricing': 'http://localhost:8787',
-      '/embed/docs': 'http://localhost:8787',
+      '/api': {
+        target: 'https://aiusage.yizhe.me',
+        changeOrigin: true,
+      },
+      '/pricing': {
+        target: 'https://aiusage.yizhe.me',
+        changeOrigin: true,
+      },
+      '/embed/docs': {
+        target: 'https://aiusage.yizhe.me',
+        changeOrigin: true,
+      },
     },
   },
 });

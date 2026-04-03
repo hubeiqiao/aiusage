@@ -1,14 +1,16 @@
 import type { Locale } from '../i18n';
+import { convertUsd } from '../hooks/use-cny-rate';
 
 export function formatUsd(v: number): string {
-  const n = Number(v || 0);
-  if (n >= 100) return `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-  if (n >= 10) return `$${n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
-  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const { value: n, prefix } = convertUsd(Number(v || 0));
+  if (n >= 100) return `${prefix}${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  if (n >= 10) return `${prefix}${n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
+  return `${prefix}${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function formatUsdFull(v: number): string {
-  return `$${Number(v || 0).toFixed(2)}`;
+  const { value: n, prefix } = convertUsd(Number(v || 0));
+  return `${prefix}${n.toFixed(2)}`;
 }
 
 export function formatCompact(v: number, locale: Locale = 'en'): string {
