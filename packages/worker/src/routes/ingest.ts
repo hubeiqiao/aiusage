@@ -185,9 +185,11 @@ export async function handleIngest(request: Request, env: Env): Promise<Response
     };
   }
 
-  // 更新 last_seen_at
-  await env.DB.prepare('UPDATE devices SET last_seen_at = ?, app_version = ? WHERE device_id = ?')
-    .bind(now, body.device.appVersion, tokenPayload.deviceId)
+  // 更新 last_seen_at + 别名（sync 时自动同步本地别名）
+  await env.DB.prepare(
+    'UPDATE devices SET last_seen_at = ?, app_version = ?, public_label = COALESCE(?, public_label) WHERE device_id = ?',
+  )
+    .bind(now, body.device.appVersion, body.device.deviceAlias ?? null, tokenPayload.deviceId)
     .run();
 
   return jsonOk({ daysProcessed: body.days.length, costSummary });
