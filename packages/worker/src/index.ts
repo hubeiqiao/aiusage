@@ -4,6 +4,7 @@ import { handleIngest } from './routes/ingest.js';
 import { handleOverview } from './routes/overview.js';
 import { handleBreakdowns } from './routes/breakdowns.js';
 import { handlePricing } from './routes/pricing.js';
+import { handleEmbedDocs } from './routes/embed-docs.js';
 import { corsHeaders, jsonError } from './utils/response.js';
 import type { Env } from './types.js';
 
@@ -32,6 +33,9 @@ export default {
     try {
       if (pathname === '/pricing' && request.method === 'GET') {
         return handlePricing(env);
+      }
+      if (pathname === '/embed/docs' && request.method === 'GET') {
+        return handleEmbedDocs(env);
       }
       if (pathname === '/favicon.ico') {
         return new Response(null, { status: 204 });
