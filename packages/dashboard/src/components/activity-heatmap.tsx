@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { HeatmapDay } from '@aiusage/shared';
 import { useIsDark } from '../hooks/use-dark';
 
@@ -7,9 +7,26 @@ import { useIsDark } from '../hooks/use-dark';
 const CELL = 11;   // 格子尺寸 px
 const GAP = 2;     // 间距 px
 const STEP = CELL + GAP;
-const WEEKS = 53;
 const DAYS = 7;
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// 响应式：移动端 13 周（约 3 个月），平板 26 周（半年），桌面 53 周（全年）
+function getWeeks(): number {
+  const w = window.innerWidth;
+  if (w < 640) return 13;
+  if (w < 1024) return 26;
+  return 53;
+}
+
+function useWeeks(): number {
+  const [weeks, setWeeks] = useState(getWeeks);
+  useEffect(() => {
+    const handler = () => setWeeks(getWeeks());
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return weeks;
+}
 
 // Gamma 校正让低值也有明显颜色区分
 const GAMMA = 0.7;
@@ -58,6 +75,7 @@ export function ActivityHeatmap({ days, className = '' }: {
   className?: string;
 }) {
   const isDark = useIsDark();
+  const weeks = useWeeks();
   const [tooltip, setTooltip] = useState<{
     x: number; y: number;
     date: string; tokens: number; cost: number;
@@ -70,19 +88,19 @@ export function ActivityHeatmap({ days, className = '' }: {
 
     const maxTokens = Math.max(0, ...days.map(d => d.totalTokens));
 
-    // 以今天为终点，往前推 52 周 + 当前列
+    // 以今天为终点，往前推 weeks 周
     const today = new Date();
     // 对齐到周日（JS getDay()=0），让今天落在最后一列
     const dayOfWeek = today.getDay(); // 0=Sun,6=Sat
     const endDate = addDays(today, 6 - dayOfWeek); // 推到本周六
-    const startDate = addDays(endDate, -(WEEKS * DAYS - 1));
+    const startDate = addDays(endDate, -(weeks * DAYS - 1));
 
     // grid[week][dayOfWeek] = { dateStr, data? }
     const grid: Array<Array<{ dateStr: string; data?: HeatmapDay }>> = [];
     let monthMarks: Array<{ weekIdx: number; label: string }> = [];
     let lastMonth = -1;
 
-    for (let w = 0; w < WEEKS; w++) {
+    for (let w = 0; w < weeks; w++) {
       const col: Array<{ dateStr: string; data?: HeatmapDay }> = [];
       for (let d = 0; d < DAYS; d++) {
         const date = addDays(startDate, w * DAYS + d);
@@ -110,9 +128,9 @@ export function ActivityHeatmap({ days, className = '' }: {
     }
 
     return { grid, monthMarks, maxTokens, activeDays, streak };
-  }, [days]);
+  }, [days, weeks]);
 
-  const svgW = WEEKS * STEP - GAP;
+  const svgW = weeks * STEP - GAP;
   const svgH = DAYS * STEP - GAP;
   const MONTH_ROW = 14;   // 月份标签行高
   const LEGEND_ROW = 20;  // 底部图例行高
