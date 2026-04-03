@@ -233,4 +233,3 @@ The controller automatically detects and scans all installed tools:
 | Qwen Code | Alibaba | `~/.qwen/tmp/` |
 | Droid | — | `~/.factory/sessions/` |
 | OpenCode | — | `~/.local/share/opencode/` |
-| OpenClaw | — | `~/.openclaw/agents/` |

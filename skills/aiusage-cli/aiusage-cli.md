@@ -93,7 +93,6 @@ The controller automatically scans all installed tools. No configuration needed:
 | Qwen Code | `~/.qwen/tmp/` |
 | Droid | `~/.factory/sessions/` |
 | OpenCode | `~/.local/share/opencode/` |
-| OpenClaw | `~/.openclaw/agents/` |
 
 ## Optional Configuration
 

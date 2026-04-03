@@ -7,7 +7,7 @@ import { scanKimiDates } from './scanners/kimi.js';
 import { scanAmpDates } from './scanners/amp.js';
 import { scanDroidDates } from './scanners/droid.js';
 import { scanOpencodeDates } from './scanners/opencode.js';
-import { scanOpenclawDates } from './scanners/openclaw.js';
+
 import type { IngestBreakdown } from '@aiusage/shared';
 
 export interface ScanResult {
@@ -50,7 +50,6 @@ export async function scanDates(targetDates: string[], options: ScanOptions = {}
     scanAmpDates(uniqueDates, undefined, options.projectAliases),
     scanDroidDates(uniqueDates, undefined, options.projectAliases),
     scanOpencodeDates(uniqueDates, undefined, options.projectAliases),
-    scanOpenclawDates(uniqueDates, undefined, options.projectAliases),
   ];
 
   const results = await Promise.all(scanners);

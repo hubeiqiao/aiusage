@@ -39,7 +39,6 @@
   <img src="https://img.shields.io/badge/Qwen_Code-5A29E4?style=for-the-badge&logo=alibabacloud&logoColor=white" alt="Qwen Code" />
   <img src="https://img.shields.io/badge/Droid-2C3E50?style=for-the-badge&logo=android&logoColor=white" alt="Droid" />
   <img src="https://img.shields.io/badge/OpenCode-16A34A?style=for-the-badge&logo=go&logoColor=white" alt="OpenCode" />
-  <img src="https://img.shields.io/badge/OpenClaw-EF4444?style=for-the-badge&logo=codeium&logoColor=white" alt="OpenClaw" />
 </p>
 
 ### 为什么选择 AIUsage？

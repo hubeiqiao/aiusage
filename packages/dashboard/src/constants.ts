@@ -22,7 +22,6 @@ export const PROVIDER_COLORS: Record<string, string> = {
   alibaba: '#cbd5e1',
   droid: '#e2e8f0',
   opencode: '#f1f5f9',
-  openclaw: '#f8fafc',
 };
 
 export const PROVIDER_LABELS: Record<string, string> = {
@@ -35,7 +34,6 @@ export const PROVIDER_LABELS: Record<string, string> = {
   alibaba: 'Alibaba',
   droid: 'Droid',
   opencode: 'OpenCode',
-  openclaw: 'OpenClaw',
 };
 
 export function providerLabel(id: string): string {
