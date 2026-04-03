@@ -1,9 +1,11 @@
 import { existsSync } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { hostname } from 'node:os';
 import { scanDate, scanDates } from './scan.js';
 import { buildLocalReport, parseReportRange } from './report.js';
 import { renderReport } from './render.js';
 import {
+  type AIUsageConfig,
   type SyncTarget,
   detectDeviceId,
   findTargetOrThrow,
@@ -154,18 +156,32 @@ async function runHealth(flags: Record<string, string | boolean>) {
 
 async function runEnroll(flags: Record<string, string | boolean>) {
   const config = await readConfig();
-  const apiBaseUrl = resolveServer(flags.server, undefined);
-  const siteId = resolveRequiredString(flags['site-id'] ?? flags.siteId, undefined, '缺少 --site-id');
-  const enrollToken = resolveRequiredString(flags['enroll-token'], undefined, '缺少 --enroll-token');
-  const deviceId = resolveOptionalString(flags['device-id'], config.deviceId) ?? detectDeviceId();
-  const deviceAlias = resolveOptionalString(flags['device-name'] ?? flags['device-alias'], config.deviceAlias);
-  const targetName = resolveOptionalString(flags.target ?? flags.name, undefined) ?? deriveTargetName(apiBaseUrl);
 
-  const response = await enrollDevice(apiBaseUrl, { siteId, deviceId, deviceAlias, enrollToken });
+  // 从 flags → config 已有 target → 交互式提示
+  const existingTarget = config.targets?.[0];
+  const apiBaseUrl = resolveOptionalString(flags.server, existingTarget?.apiBaseUrl)
+    ?? await prompt('Server URL: ');
+  if (!apiBaseUrl) throw new Error('缺少服务端地址');
+  const normalizedUrl = normalizeServerUrl(apiBaseUrl);
+
+  const siteId = resolveOptionalString(flags['site-id'] ?? flags.siteId, existingTarget?.siteId)
+    ?? await prompt('Site ID: ');
+  if (!siteId) throw new Error('缺少 site-id');
+
+  const enrollToken = resolveOptionalString(flags['enroll-token'], undefined)
+    ?? await prompt('Enroll Token: ');
+  if (!enrollToken) throw new Error('缺少 enroll-token');
+
+  const deviceId = resolveOptionalString(flags['device-id'], config.deviceId) ?? detectDeviceId();
+  const deviceAlias = resolveOptionalString(flags['device-name'] ?? flags['device-alias'], config.deviceAlias)
+    ?? (await prompt(`Device Name [${hostname()}]: `) || hostname());
+  const targetName = resolveOptionalString(flags.target ?? flags.name, undefined) ?? deriveTargetName(normalizedUrl);
+
+  const response = await enrollDevice(normalizedUrl, { siteId, deviceId, deviceAlias, enrollToken });
 
   const target: SyncTarget = {
     name: targetName,
-    apiBaseUrl,
+    apiBaseUrl: normalizedUrl,
     siteId,
     deviceToken: response.deviceToken,
     lastSuccessfulUploadAt: undefined,
@@ -185,6 +201,16 @@ async function runEnroll(flags: Record<string, string | boolean>) {
     issuedAt: response.issuedAt,
     configPath: getConfigPath(),
   }, null, 2));
+}
+
+function prompt(question: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 async function runSync(flags: Record<string, string | boolean>) {
@@ -289,7 +315,7 @@ async function runSync(flags: Record<string, string | boolean>) {
 
 async function runInit(flags: Record<string, string | boolean>) {
   const config = await readConfig();
-  const next = {
+  const next: AIUsageConfig = {
     ...config,
     deviceId: resolveOptionalString(flags['device-id'], config.deviceId) ?? detectDeviceId(),
     deviceAlias: resolveOptionalString(flags['device-name'] ?? flags['device-alias'], config.deviceAlias) ?? hostname(),
@@ -297,6 +323,24 @@ async function runInit(flags: Record<string, string | boolean>) {
       ? parsePositiveInt(flags.lookback, '--lookback')
       : config.lookbackDays ?? 7,
   };
+  // 保存 server / site-id 到默认 target（方便后续 enroll 读取）
+  const serverUrl = resolveOptionalString(flags.server, undefined);
+  const siteId = resolveOptionalString(flags['site-id'] ?? flags.siteId, undefined);
+  if (serverUrl || siteId) {
+    const existing = next.targets?.[0];
+    const target: SyncTarget = {
+      name: existing?.name ?? 'default',
+      apiBaseUrl: serverUrl ? normalizeServerUrl(serverUrl) : existing?.apiBaseUrl ?? '',
+      siteId: siteId ?? existing?.siteId,
+      deviceToken: existing?.deviceToken,
+      lastSuccessfulUploadAt: existing?.lastSuccessfulUploadAt,
+    };
+    const targets = next.targets ?? [];
+    const idx = targets.findIndex(t => t.name === target.name);
+    if (idx >= 0) targets[idx] = target;
+    else targets.push(target);
+    next.targets = targets;
+  }
   await writeConfig(next);
   console.log(JSON.stringify({ configPath: getConfigPath(), config: next }, null, 2));
 }
