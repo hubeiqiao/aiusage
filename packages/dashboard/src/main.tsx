@@ -4,6 +4,11 @@ import { App } from './app';
 import { EmbedApp } from './embed/embed-app';
 import './styles.css';
 
+if ('scrollRestoration' in history) {
+  history.scrollRestoration = 'manual';
+}
+window.scrollTo(0, 0);
+
 const isEmbed = window.location.pathname.startsWith('/embed') && !window.location.pathname.startsWith('/embed/docs');
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

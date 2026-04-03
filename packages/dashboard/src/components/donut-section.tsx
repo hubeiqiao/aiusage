@@ -14,7 +14,7 @@ export function ProviderBars({
   const max = Math.max(...data.map((d) => d.estimatedCostUsd), 1);
   return (
     <div>
-      <h3 className="mb-4 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Provider Share</h3>
+      <h3 className="mb-4 text-[13px] font-semibold text-slate-900 dark:text-slate-300">Provider Share</h3>
       <div className="flex flex-col gap-3">
         {data.map((item) => {
           const pct = (item.estimatedCostUsd / max) * 100;
@@ -22,9 +22,9 @@ export function ProviderBars({
             <div key={item.label}>
               <div className="mb-1 flex items-baseline justify-between text-[12px]">
                 <span className="font-medium text-slate-700 dark:text-slate-300">{item.label}</span>
-                <span className="tabular-nums font-medium text-slate-900 dark:text-slate-100">{formatUsd(item.estimatedCostUsd)}</span>
+                <span className="tabular-nums font-medium text-slate-900 dark:text-slate-300">{formatUsd(item.estimatedCostUsd)}</span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-[#1a1a1a]">
                 <div
                   className="h-full rounded-full bg-slate-800 dark:bg-slate-300 transition-all duration-500"
                   style={{ width: `${pct}%` }}
@@ -56,7 +56,7 @@ export function DonutSection({
 
   return (
     <div>
-      <h3 className="mb-4 text-[13px] font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
+      <h3 className="mb-4 text-[13px] font-semibold text-slate-900 dark:text-slate-300">{title}</h3>
       <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-5">
         {/* Ring */}
         <div className="relative shrink-0">
@@ -76,7 +76,7 @@ export function DonutSection({
             </ResponsiveContainer>
           </ChartContainer>
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="text-[13px] font-semibold tabular-nums text-slate-900 dark:text-slate-100">{centerLabel}</span>
+            <span className="text-[13px] font-semibold tabular-nums text-slate-900 dark:text-slate-300">{centerLabel}</span>
           </div>
         </div>
 
@@ -92,7 +92,7 @@ export function DonutSection({
                 />
                 <span className="min-w-0 flex-1 truncate text-slate-500 dark:text-slate-400">{item.label}</span>
                 <span className="shrink-0 tabular-nums text-slate-400 dark:text-slate-500">{formatPercent(pct)}</span>
-                <span className="shrink-0 font-medium tabular-nums text-slate-900 dark:text-slate-100">
+                <span className="shrink-0 font-medium tabular-nums text-slate-900 dark:text-slate-300">
                   {formatUsd(item.estimatedCostUsd)}
                 </span>
               </div>

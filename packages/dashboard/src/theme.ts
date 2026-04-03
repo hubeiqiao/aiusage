@@ -5,8 +5,18 @@ export function getStoredTheme(): ThemeMode {
   catch { return 'system'; }
 }
 
-export function applyTheme(mode: ThemeMode) {
+let transitionTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function applyTheme(mode: ThemeMode, animate = true) {
   const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  document.documentElement.classList.toggle('dark', isDark);
+  const root = document.documentElement;
+
+  if (animate) {
+    root.classList.add('theme-transition');
+    clearTimeout(transitionTimer);
+    transitionTimer = setTimeout(() => root.classList.remove('theme-transition'), 500);
+  }
+
+  root.classList.toggle('dark', isDark);
   try { localStorage.setItem('aiusage-theme', mode); } catch {}
 }

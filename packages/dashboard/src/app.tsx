@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { RotateCw, Github, Heart, Sun, Moon, Monitor } from 'lucide-react';
 import type { Locale, T } from './i18n';
 import { I18N, getStoredLocale } from './i18n';
 import type { ThemeMode } from './theme';
 import { getStoredTheme, applyTheme } from './theme';
-import { TOKEN_SERIES, CHART_COLORS, providerLabel, formatProductLabel } from './constants';
+import { TOKEN_SERIES, getChartColors, getTokenColor, providerLabel, formatProductLabel } from './constants';
+import { useIsDark } from './hooks/use-dark';
 import {
   formatUsd, formatUsdFull, formatCompact, formatNumber, formatPercent,
   formatModelName, shortDate, longDate, arrSum, foldItems,
@@ -51,7 +52,7 @@ const THEME_LABELS: Record<ThemeMode, { en: string; zh: string }> = {
 
 function ThemeToggle({ value, onChange, locale }: { value: ThemeMode; onChange: (v: ThemeMode) => void; locale: Locale }) {
   return (
-    <div className="inline-flex items-center rounded-md bg-slate-100/80 p-0.5 dark:bg-slate-800/80">
+    <div className="inline-flex items-center rounded-md bg-slate-100/80 p-0.5 dark:bg-[#1a1a1a]/80">
       {THEME_OPTIONS.map((o) => {
         const Icon = o.icon;
         return (
@@ -60,7 +61,7 @@ function ThemeToggle({ value, onChange, locale }: { value: ThemeMode; onChange: 
             onClick={() => onChange(o.value)}
             className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-all duration-150 ${
               value === o.value
-                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-[#222222] dark:text-slate-300'
                 : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'
             }`}
             aria-label={o.value}
@@ -76,14 +77,14 @@ function ThemeToggle({ value, onChange, locale }: { value: ThemeMode; onChange: 
 
 function LangToggle({ value, onChange }: { value: Locale; onChange: (v: Locale) => void }) {
   return (
-    <div className="inline-flex items-center rounded-md bg-slate-100/80 p-0.5 dark:bg-slate-800/80">
+    <div className="inline-flex items-center rounded-md bg-slate-100/80 p-0.5 dark:bg-[#1a1a1a]/80">
       {(['en', 'zh'] as const).map((l) => (
         <button
           key={l}
           onClick={() => onChange(l)}
           className={`rounded px-2 py-1 text-[11px] font-medium transition-all duration-150 ${
             value === l
-              ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+              ? 'bg-white text-slate-900 shadow-sm dark:bg-[#222222] dark:text-slate-300'
               : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'
           }`}
         >
@@ -108,7 +109,7 @@ function SegmentedControl({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="inline-flex items-center rounded-lg bg-slate-100/80 p-0.5 dark:bg-slate-800/80" role="radiogroup">
+    <div className="inline-flex items-center rounded-lg bg-slate-100/80 p-0.5 dark:bg-[#1a1a1a]/80" role="radiogroup">
       {options.map((o) => (
         <button
           key={o.value}
@@ -117,7 +118,7 @@ function SegmentedControl({
           onClick={() => onChange(o.value)}
           className={`rounded-md px-3 py-1.5 text-[13px] font-medium transition-all duration-150 ${
             value === o.value
-              ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+              ? 'bg-white text-slate-900 shadow-sm dark:bg-[#222222] dark:text-slate-300'
               : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'
           }`}
         >
@@ -140,10 +141,10 @@ function FilterTabs({
   allLabel?: string;
 }) {
   if (!options.length) return null;
-  const activeClass = 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100';
+  const activeClass = 'bg-white text-slate-900 shadow-sm dark:bg-[#222222] dark:text-slate-300';
   const inactiveClass = 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300';
   return (
-    <div className="inline-flex items-center rounded-lg bg-slate-100/80 p-0.5 dark:bg-slate-800/80">
+    <div className="inline-flex items-center rounded-lg bg-slate-100/80 p-0.5 dark:bg-[#1a1a1a]/80">
       <button
         onClick={() => onChange('')}
         className={`rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-all duration-150 ${
@@ -179,12 +180,15 @@ export function App() {
   const { overview, health, kpis, fOpts, loading, error, isDemo, refresh } = useOverview(filters);
   useFetchCnyRate();
   useCurrencyStore(); // subscribe to re-render on toggle
+  const isDark = useIsDark();
 
   // Theme
   const [theme, setThemeState] = useState<ThemeMode>(getStoredTheme);
+  const isFirstRender = useRef(true);
   const setTheme = useCallback((m: ThemeMode) => { setThemeState(m); applyTheme(m); }, []);
   useEffect(() => {
-    applyTheme(theme);
+    applyTheme(theme, !isFirstRender.current);
+    isFirstRender.current = false;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = () => { if (theme === 'system') applyTheme('system'); };
     mq.addEventListener('change', handler);
@@ -210,10 +214,10 @@ export function App() {
     const tc = overview.tokenComposition;
     return TOKEN_SERIES.map((s) => ({
       label: t[tokenLegendLabels[s.key] ?? 'input'],
-      color: s.color,
+      color: getTokenColor(s, isDark),
       value: formatCompact(arrSum(tc.map((d) => Number(d[s.key] || 0))), locale),
     }));
-  }, [overview, t, locale]);
+  }, [overview, t, locale, isDark]);
 
   return (
     <main className="mx-auto max-w-[1200px] px-4 pb-16 sm:px-6 lg:px-8">
@@ -221,7 +225,7 @@ export function App() {
       {/* ── Header ── */}
       <header className="fade-up relative z-20 py-6 sm:py-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="flex items-center gap-2 text-[22px] font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+          <h1 className="flex items-center gap-2 text-[22px] font-semibold tracking-tight text-slate-900 dark:text-slate-300">
             <svg viewBox="0 0 200 160" fill="none" className="h-7 w-7" aria-hidden="true">
               <path d="M22 112 C30 112 38 90 44 82 C50 74 54 78 58 88 C62 98 64 116 70 120 C76 124 80 108 86 84 C92 60 96 22 104 16 C112 10 116 36 120 64 C124 92 126 138 134 140 C142 142 146 108 152 72 C158 36 162 14 168 16 C174 18 178 50 182 68" stroke="currentColor" strokeWidth="20" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -232,7 +236,7 @@ export function App() {
             <LangToggle value={locale} onChange={setLocale} />
             <button
               onClick={refresh}
-              className="hidden sm:inline-flex items-center justify-center rounded-md bg-slate-100/80 p-1.5 text-slate-400 transition-colors hover:text-slate-600 dark:bg-slate-800/80 dark:text-slate-500 dark:hover:text-slate-300"
+              className="hidden sm:inline-flex items-center justify-center rounded-md bg-slate-100/80 p-1.5 text-slate-400 transition-colors hover:text-slate-600 dark:bg-[#1a1a1a]/80 dark:text-slate-500 dark:hover:text-slate-300"
               aria-label="Refresh"
             >
               <RotateCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -254,8 +258,8 @@ export function App() {
               onClick={() => setFilters((f) => ({ ...f, range: 'month' }))}
               className={`shrink-0 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all duration-150 ${
                 filters.range === 'month'
-                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                  : 'bg-slate-100/80 text-slate-400 hover:text-slate-600 dark:bg-slate-800/80 dark:text-slate-500 dark:hover:text-slate-300'
+                  ? 'bg-white text-slate-900 shadow-sm dark:bg-[#222222] dark:text-slate-300'
+                  : 'bg-slate-100/80 text-slate-400 hover:text-slate-600 dark:bg-[#1a1a1a]/80 dark:text-slate-500 dark:hover:text-slate-300'
               }`}
             >
               {t.thisMonth}
@@ -263,7 +267,7 @@ export function App() {
           </div>
           {overview && fOpts.products.length > 1 && (
             <>
-              <div className="hidden h-5 w-px bg-slate-200 dark:bg-slate-700 sm:block" />
+              <div className="hidden h-5 w-px bg-slate-200 dark:bg-[#222222] sm:block" />
               <div className="overflow-x-auto">
                 <FilterTabs
                   value={filters.product}
@@ -276,7 +280,7 @@ export function App() {
           )}
           {overview && fOpts.devices.length >= 1 && (
             <>
-              <div className="hidden h-5 w-px bg-slate-200 dark:bg-slate-700 sm:block" />
+              <div className="hidden h-5 w-px bg-slate-200 dark:bg-[#222222] sm:block" />
               <div className="overflow-x-auto">
                 <FilterTabs
                   value={filters.deviceId}
@@ -415,17 +419,17 @@ export function App() {
                       estimatedCostUsd: p.estimatedCostUsd,
                       eventCount: p.eventCount,
                     }))}
-                    colors={['#0f172a', '#475569', '#94a3b8', '#cbd5e1']}
+                    colors={getChartColors(isDark)}
                     centerLabel={formatUsd(overview?.totalCostUsd ?? 0)}
                   />
-                  <div className="my-5 border-t border-slate-100 dark:border-slate-800" />
+                  <div className="my-5 border-t border-slate-100 dark:border-white/[0.08]" />
                   <DonutSection
                     title={t.modelShare}
                     data={(overview?.modelCostShare ?? []).map((m) => ({ ...m, label: formatModelName(m.label) }))}
-                    colors={CHART_COLORS}
+                    colors={getChartColors(isDark)}
                     centerLabel={formatUsd(overview?.totalCostUsd ?? 0)}
                   />
-                  <div className="my-5 border-t border-slate-100 dark:border-slate-800" />
+                  <div className="my-5 border-t border-slate-100 dark:border-white/[0.08]" />
                   <DonutSection
                     title={t.deviceShare}
                     data={(overview?.filters.options.devices ?? []).map((d) => ({
@@ -434,7 +438,7 @@ export function App() {
                       estimatedCostUsd: d.estimatedCostUsd,
                       eventCount: d.eventCount,
                     }))}
-                    colors={CHART_COLORS}
+                    colors={getChartColors(isDark)}
                     centerLabel={formatUsd(overview?.totalCostUsd ?? 0)}
                   />
                 </div>
@@ -446,7 +450,7 @@ export function App() {
       )}
 
       {/* ── Footer ── */}
-      <footer className="fade-up mt-16 border-t border-slate-100 dark:border-slate-800 pb-10 pt-8">
+      <footer className="fade-up mt-16 border-t border-slate-100 dark:border-white/[0.08] pb-10 pt-8">
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center gap-3 text-[12px] text-slate-400 dark:text-slate-500">
             <span className="flex items-center gap-1.5 font-medium text-slate-500 dark:text-slate-400">
@@ -456,7 +460,7 @@ export function App() {
               AI Usage
             </span>
             {health?.version && (
-              <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-400 dark:text-slate-500">
+              <span className="rounded-full bg-slate-100 dark:bg-[#1a1a1a] px-2 py-0.5 text-[10px] font-medium text-slate-400 dark:text-slate-500">
                 v{health.version}
               </span>
             )}
@@ -471,21 +475,21 @@ export function App() {
               <Github className="h-3.5 w-3.5" />
               <span>GitHub</span>
             </a>
-            <span className="h-3 w-px bg-slate-200 dark:bg-slate-700" />
+            <span className="h-3 w-px bg-slate-200 dark:bg-[#222222]" />
             <a
               href="/pricing"
               className="text-slate-400 transition-colors hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
             >
               {t.pricing}
             </a>
-            <span className="h-3 w-px bg-slate-200 dark:bg-slate-700" />
+            <span className="h-3 w-px bg-slate-200 dark:bg-[#222222]" />
             <a
               href="/embed/docs"
               className="text-slate-400 transition-colors hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
             >
               {t.embedWidgets}
             </a>
-            <span className="h-3 w-px bg-slate-200 dark:bg-slate-700" />
+            <span className="h-3 w-px bg-slate-200 dark:bg-[#222222]" />
             <span className="flex items-center gap-1">
               Made with <Heart className="h-3 w-3 fill-red-300 text-red-300" /> by{' '}
               <a

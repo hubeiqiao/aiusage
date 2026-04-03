@@ -79,13 +79,13 @@ export function ChartTooltipContent({
   return (
     <div
       className={cn(
-        'min-w-[188px] rounded-2xl border border-slate-200/90 bg-white/96 px-3.5 py-3 shadow-[0_20px_50px_rgba(15,23,42,0.12)] backdrop-blur',
+        'min-w-[188px] rounded-2xl border border-slate-200/90 bg-white/96 px-3.5 py-3 shadow-[0_20px_50px_rgba(15,23,42,0.12)] backdrop-blur dark:border-white/10 dark:bg-[#1a1a1a]/96 dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)]',
         className,
       )}
       {...props}
     >
       {!hideLabel && label != null ? (
-        <div className="mb-2 text-[11px] font-semibold tracking-[0.02em] text-slate-950">
+        <div className="mb-2 text-[11px] font-semibold tracking-[0.02em] text-slate-950 dark:text-slate-300">
           {labelFormatter ? labelFormatter(String(label)) : String(label)}
         </div>
       ) : null}
@@ -102,8 +102,8 @@ export function ChartTooltipContent({
                 className={cn('rounded-full bg-current', indicator === 'line' ? 'h-2 w-6' : 'h-2.5 w-2.5')}
                 style={{ color: tone }}
               />
-              <span className="truncate text-[11px] text-slate-500">{itemLabel}</span>
-              <span className="text-[11px] font-semibold text-slate-950">
+              <span className="truncate text-[11px] text-slate-500 dark:text-slate-400">{itemLabel}</span>
+              <span className="text-[11px] font-semibold text-slate-950 dark:text-slate-300">
                 {formatter ? formatter(item.value ?? 0, String(itemLabel)) : String(item.value ?? 0)}
               </span>
             </div>

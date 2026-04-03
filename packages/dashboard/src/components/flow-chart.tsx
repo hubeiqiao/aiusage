@@ -56,7 +56,7 @@ export function FlowChart({ data }: { data?: SankeyGraph }) {
               const val = Number(d.value ?? 0);
               if (srcNode?.name && tgtNode?.name) {
                 return (
-                  <div className="rounded-lg border border-slate-200/90 bg-white/96 px-3 py-2 text-[12px] shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-800/96">
+                  <div className="rounded-lg border border-slate-200/90 bg-white/96 px-3 py-2 text-[12px] shadow-lg backdrop-blur dark:border-white/10 dark:bg-[#1a1a1a]/96">
                     <div className="font-medium text-slate-700 dark:text-slate-200">{srcNode.name} → {tgtNode.name}</div>
                     <div className="mt-0.5 tabular-nums text-slate-500 dark:text-slate-400">{formatCompact(val)} tokens</div>
                   </div>
@@ -64,7 +64,7 @@ export function FlowChart({ data }: { data?: SankeyGraph }) {
               }
               if (nodeName) {
                 return (
-                  <div className="rounded-lg border border-slate-200/90 bg-white/96 px-3 py-2 text-[12px] shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-800/96">
+                  <div className="rounded-lg border border-slate-200/90 bg-white/96 px-3 py-2 text-[12px] shadow-lg backdrop-blur dark:border-white/10 dark:bg-[#1a1a1a]/96">
                     <div className="font-medium text-slate-700 dark:text-slate-200">{nodeName}</div>
                     {val > 0 && <div className="mt-0.5 tabular-nums text-slate-500 dark:text-slate-400">{formatCompact(val)} tokens</div>}
                   </div>

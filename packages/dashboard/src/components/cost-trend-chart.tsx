@@ -6,10 +6,11 @@ import {
   ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
 } from './ui/chart';
 import type { OverviewPayload } from '../hooks/use-overview';
-import { CHART_COLORS, providerLabel } from '../constants';
+import { getChartColors, providerLabel } from '../constants';
 import { formatUsd, formatUsdFull, shortDate, longDate } from '../utils/format';
 import { pivotProviderTrend } from '../utils/data';
 import { EmptyState, ChartLegend } from './chart-helpers';
+import { useIsDark } from '../hooks/use-dark';
 
 export function CostTrendChart({
   data,
@@ -18,6 +19,7 @@ export function CostTrendChart({
   data: OverviewPayload['dailyTrend'];
   providerTrend: OverviewPayload['providerDailyTrend'];
 }) {
+  const isDark = useIsDark();
   if (!data.length) return <EmptyState label="No data" />;
 
   const { data: pivoted, providers } = useMemo(
@@ -26,9 +28,10 @@ export function CostTrendChart({
   );
 
   const barW = data.length <= 7 ? 94 : data.length <= 30 ? 47 : 20;
+  const colors = getChartColors(isDark);
 
   const config = Object.fromEntries(
-    providers.map((p, i) => [p, { label: providerLabel(p), color: CHART_COLORS[i % CHART_COLORS.length] }]),
+    providers.map((p, i) => [p, { label: providerLabel(p), color: colors[i % colors.length] }]),
   ) satisfies ChartConfig;
 
   return (
@@ -36,7 +39,7 @@ export function CostTrendChart({
       <ChartContainer config={config} className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={pivoted} margin={{ top: 12, left: 4, right: 12, bottom: 0 }} barSize={barW}>
-            <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-slate-100 dark:stroke-slate-800" />
+            <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-slate-100 dark:stroke-white/[0.06]" />
             <XAxis
               dataKey="usageDate" tickLine={false} axisLine={false}
               tickMargin={12} tickFormatter={shortDate} minTickGap={36}
@@ -47,7 +50,7 @@ export function CostTrendChart({
               tickFormatter={(v) => formatUsd(Number(v))} className="fill-slate-400 dark:fill-slate-500" fontSize={11}
             />
             <ChartTooltip
-              cursor={{ fill: '#f8fafc' }}
+              cursor={{ fill: isDark ? 'rgba(51,65,85,0.3)' : '#f8fafc' }}
               content={
                 <ChartTooltipContent
                   labelFormatter={longDate}
@@ -60,7 +63,7 @@ export function CostTrendChart({
                 key={p}
                 dataKey={p}
                 stackId="cost"
-                fill={CHART_COLORS[i % CHART_COLORS.length]}
+                fill={colors[i % colors.length]}
                 radius={i === providers.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
               />
             ))}
@@ -71,7 +74,7 @@ export function CostTrendChart({
         <ChartLegend
           items={providers.map((p, i) => ({
             label: providerLabel(p),
-            color: CHART_COLORS[i % CHART_COLORS.length],
+            color: colors[i % colors.length],
           }))}
         />
       )}

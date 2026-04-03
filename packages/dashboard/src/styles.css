@@ -18,6 +18,14 @@ html, body, #root {
   min-height: 100%;
 }
 
+/* Smooth theme transition */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 0.4s ease, border-color 0.4s ease, color 0.3s ease, fill 0.3s ease, stroke 0.3s ease, box-shadow 0.4s ease !important;
+}
+
 body {
   margin: 0;
   background: #fafafa;
@@ -30,8 +38,8 @@ body {
 }
 
 .dark body {
-  background: #0b0f1a;
-  color: #e2e8f0;
+  background: #0a0a0a;
+  color: #a1a1a1;
 }
 
 * {
@@ -43,7 +51,7 @@ body {
 }
 
 .dark ::selection {
-  background: rgba(148, 163, 184, 0.2);
+  background: rgba(255, 255, 255, 0.15);
 }
 
 /* Card */
@@ -55,8 +63,8 @@ body {
 }
 
 .dark .card {
-  background: #141929;
-  border-color: rgba(51, 65, 85, 0.5);
+  background: #111111;
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 /* Charts need visible overflow for tooltips */
@@ -100,11 +108,11 @@ body {
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #333333;
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #444444;
 }
 
 /* Embed mode */
@@ -123,13 +131,13 @@ body.embed-transparent .card {
 }
 
 .dark body.embed-transparent .card {
-  border-color: rgba(51, 65, 85, 0.3);
+  border-color: rgba(255, 255, 255, 0.06);
 }
 
 /* Dark-mode Recharts tooltip override */
 .dark .recharts-tooltip-wrapper .recharts-default-tooltip,
 .dark [class*="ChartTooltipContent"] {
-  background: #1e293b !important;
-  border-color: #334155 !important;
-  color: #e2e8f0 !important;
+  background: #1a1a1a !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #a1a1a1 !important;
 }

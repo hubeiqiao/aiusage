@@ -6,18 +6,20 @@ import {
 } from './ui/chart';
 import type { OverviewPayload } from '../hooks/use-overview';
 import type { Locale } from '../i18n';
-import { TOKEN_SERIES, TOKEN_CONFIG } from '../constants';
+import { TOKEN_SERIES, getTokenConfig, getTokenColor } from '../constants';
 import { formatCompact, formatNumber, shortDate, longDate } from '../utils/format';
 import { EmptyState } from './chart-helpers';
+import { useIsDark } from '../hooks/use-dark';
 
 export function TokenCompositionChart({ data, locale }: { data: OverviewPayload['tokenComposition']; locale: Locale }) {
+  const isDark = useIsDark();
   if (!data.length) return <EmptyState label="No data" />;
   const barW = data.length <= 7 ? 94 : data.length <= 30 ? 47 : 20;
   return (
-    <ChartContainer config={TOKEN_CONFIG} className="h-[280px] w-full">
+    <ChartContainer config={getTokenConfig(isDark)} className="h-[280px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 12, left: 4, right: 12, bottom: 0 }} barSize={barW}>
-          <CartesianGrid vertical={false} className="stroke-slate-100 dark:stroke-slate-800" />
+          <CartesianGrid vertical={false} className="stroke-slate-100 dark:stroke-white/[0.06]" />
           <XAxis
             dataKey="usageDate" tickLine={false} axisLine={false}
             tickMargin={12} tickFormatter={shortDate} minTickGap={36}
@@ -28,7 +30,7 @@ export function TokenCompositionChart({ data, locale }: { data: OverviewPayload[
             tickFormatter={(v) => formatCompact(Number(v), locale)} className="fill-slate-400 dark:fill-slate-500" fontSize={11}
           />
           <ChartTooltip
-            cursor={{ fill: '#f8fafc' }}
+            cursor={{ fill: isDark ? 'rgba(51,65,85,0.3)' : '#f8fafc' }}
             content={
               <ChartTooltipContent
                 labelFormatter={longDate}
@@ -38,7 +40,7 @@ export function TokenCompositionChart({ data, locale }: { data: OverviewPayload[
           />
           {TOKEN_SERIES.map((s, i) => (
             <Bar
-              key={s.key} dataKey={s.key} stackId="tok" fill={s.color}
+              key={s.key} dataKey={s.key} stackId="tok" fill={getTokenColor(s, isDark)}
               radius={i === TOKEN_SERIES.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
             />
           ))}

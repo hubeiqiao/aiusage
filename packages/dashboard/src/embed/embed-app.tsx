@@ -5,7 +5,8 @@ import type { ThemeMode } from '../theme';
 import { applyTheme } from '../theme';
 import { I18N, type Locale, type T } from '../i18n';
 import { useOverview, type OverviewPayload } from '../hooks/use-overview';
-import { TOKEN_SERIES, CHART_COLORS, providerLabel } from '../constants';
+import { TOKEN_SERIES, getChartColors, getTokenColor, providerLabel } from '../constants';
+import { useIsDark } from '../hooks/use-dark';
 import {
   formatUsd, formatCompact, formatNumber, formatPercent, formatModelName, arrSum,
 } from '../utils/format';
@@ -88,16 +89,17 @@ function WidgetRenderer({
   t: T;
   locale: Locale;
 }) {
+  const isDark = useIsDark();
   // token legend (shared by token-trend / token-composition)
   const tokenLegend = useMemo(() => {
     if (!overview) return [];
     const tc = overview.tokenComposition;
     return TOKEN_SERIES.map((s) => ({
       label: t[tokenLegendLabels[s.key] ?? 'input'],
-      color: s.color,
+      color: getTokenColor(s, isDark),
       value: formatCompact(arrSum(tc.map((d) => Number(d[s.key] || 0))), locale),
     }));
-  }, [overview, t, locale]);
+  }, [overview, t, locale, isDark]);
 
   switch (widget) {
     /* ── KPI Row 1 ── */
@@ -193,16 +195,16 @@ function WidgetRenderer({
       }));
 
       const centerLabel = formatUsd(overview?.totalCostUsd ?? 0);
-      const providerColors = ['#0f172a', '#475569', '#94a3b8', '#cbd5e1'];
+      const colors = getChartColors(isDark);
 
       const sections = [
-        { idx: 0, title: t.providerShare, data: providerData, colors: providerColors },
-        { idx: 1, title: t.modelShare, data: modelData, colors: CHART_COLORS },
-        { idx: 2, title: t.deviceShare, data: deviceData, colors: CHART_COLORS },
+        { idx: 0, title: t.providerShare, data: providerData, colors },
+        { idx: 1, title: t.modelShare, data: modelData, colors },
+        { idx: 2, title: t.deviceShare, data: deviceData, colors },
       ];
 
       const visible = items ? sections.filter((s) => items.includes(s.idx)) : sections;
-      const divider = <div className="my-5 border-t border-slate-100 dark:border-slate-800" />;
+      const divider = <div className="my-5 border-t border-slate-100 dark:border-white/[0.08]" />;
 
       return (
         <>

@@ -27,15 +27,15 @@ export function EmptyState({ label }: { label: string }) {
 }
 
 export function Skeleton({ className = '' }: { className?: string }) {
-  return <div className={`animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800 ${className}`} />;
+  return <div className={`animate-pulse rounded-lg bg-slate-100 dark:bg-[#1a1a1a] ${className}`} />;
 }
 
 export function SectionHeader({ title, stat }: { title: string; stat?: string }) {
   return (
     <div className="mb-5 flex items-baseline justify-between">
-      <h2 className="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-slate-100">{title}</h2>
+      <h2 className="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-slate-300">{title}</h2>
       {stat && (
-        <span className="text-[14px] font-semibold tabular-nums text-slate-900 dark:text-slate-100">{stat}</span>
+        <span className="text-[14px] font-semibold tabular-nums text-slate-900 dark:text-slate-300">{stat}</span>
       )}
     </div>
   );

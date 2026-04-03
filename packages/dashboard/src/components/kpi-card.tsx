@@ -20,7 +20,7 @@ export function KpiCard({
       </div>
       <div
         className={`mt-1.5 text-[22px] tracking-tight tabular-nums leading-none ${
-          highlight ? 'font-bold text-emerald-600 dark:text-emerald-400' : 'font-semibold text-slate-900 dark:text-slate-100'
+          highlight ? 'font-bold text-emerald-600 dark:text-emerald-500' : 'font-semibold text-slate-900 dark:text-slate-400'
         }`}
       >
         {value}
@@ -50,7 +50,7 @@ export function CostKpiCard({
         {label}
       </div>
       <div className="mt-1.5 flex items-center gap-1.5">
-        <span className="text-[22px] tracking-tight tabular-nums leading-none font-bold text-emerald-600 dark:text-emerald-400">
+        <span className="text-[22px] tracking-tight tabular-nums leading-none font-bold text-emerald-600 dark:text-emerald-500">
           {value}
         </span>
         {rate && (
