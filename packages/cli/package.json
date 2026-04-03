@@ -1,0 +1,51 @@
+{
+  "name": "@aiusage/cli",
+  "version": "1.0.0",
+  "description": "Track and sync AI tool token usage across devices.",
+  "license": "MIT",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ennann/aiusage.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/ennann/aiusage",
+  "bugs": {
+    "url": "https://github.com/ennann/aiusage/issues"
+  },
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "aiusage": "dist/cli.js"
+  },
+  "keywords": [
+    "aiusage",
+    "claude-code",
+    "codex",
+    "tokens",
+    "cli",
+    "analytics"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "rm -rf dist && node build.mjs",
+    "dev": "tsc --watch",
+    "lint": "tsc --noEmit",
+    "test": "echo 'no tests yet'"
+  },
+  "devDependencies": {
+    "@aiusage/shared": "workspace:*",
+    "@types/node": "^22",
+    "esbuild": "^0.27.4",
+    "typescript": "^5"
+  }
+}

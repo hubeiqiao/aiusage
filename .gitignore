@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+*.tsbuildinfo
+
+# Turbo
+.turbo/
+
+# Cloudflare Workers
+.wrangler/
+.dev.vars
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+.credentials
+dev
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test & Coverage
+coverage/
+
+# Legacy scripts
+token_cost_report.py
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
