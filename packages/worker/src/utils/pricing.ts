@@ -158,6 +158,27 @@ const catalog: PricingCatalog = {
             cache_write_5m_per_million_usd: 0,
             cache_write_1h_per_million_usd: 0,
           },
+          'gpt-5.3-codex': {
+            input_per_million_usd: 1.75,
+            output_per_million_usd: 14,
+            cached_input_per_million_usd: 0.175,
+            cache_write_5m_per_million_usd: 0,
+            cache_write_1h_per_million_usd: 0,
+          },
+          'gpt-5.2-codex': {
+            input_per_million_usd: 1.75,
+            output_per_million_usd: 14,
+            cached_input_per_million_usd: 0.175,
+            cache_write_5m_per_million_usd: 0,
+            cache_write_1h_per_million_usd: 0,
+          },
+          'gpt-5-codex': {
+            input_per_million_usd: 1.25,
+            output_per_million_usd: 10,
+            cached_input_per_million_usd: 0.125,
+            cache_write_5m_per_million_usd: 0,
+            cache_write_1h_per_million_usd: 0,
+          },
           'gpt-5.1-codex-max': {
             input_per_million_usd: 1.25,
             output_per_million_usd: 10,
