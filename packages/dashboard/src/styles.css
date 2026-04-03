@@ -107,6 +107,25 @@ body {
   background: #475569;
 }
 
+/* Embed mode */
+.embed-root {
+  padding: 8px;
+  min-height: auto;
+}
+
+body.embed-transparent,
+body.embed-transparent .card {
+  background: transparent !important;
+}
+
+body.embed-transparent .card {
+  border-color: rgba(148, 163, 184, 0.15);
+}
+
+.dark body.embed-transparent .card {
+  border-color: rgba(51, 65, 85, 0.3);
+}
+
 /* Dark-mode Recharts tooltip override */
 .dark .recharts-tooltip-wrapper .recharts-default-tooltip,
 .dark [class*="ChartTooltipContent"] {
