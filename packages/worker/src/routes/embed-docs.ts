@@ -99,7 +99,7 @@ function t(zh: string, en: string): string {
 /* ── widget card rendering ── */
 
 function renderWidgetCard(w: WidgetDef, origin: string): string {
-  const embedCode = `<iframe src="${origin}/embed?widget=${w.id}" width="100%" height="${w.iframeHeight}" frameborder="0"></iframe>`;
+  const embedCode = `<iframe src="${origin}/embed?widget=${w.id}" width="100%" height="${w.iframeHeight}" frameborder="0" style="border:none"></iframe>`;
 
   const itemsRow = w.supportsItems
     ? `<tr><td><code>items</code></td><td>${t(w.itemsNoteZh ?? '', w.itemsNoteEn ?? '')}</td><td>${t('指定展示哪些子项（逗号分隔索引）', 'Specify which sub-items to show (comma-separated indices)')}</td></tr>`
@@ -641,6 +641,42 @@ function renderEmbedDocsPage(origin: string): string {
           </tbody>
         </table>
       </div>
+    </section>
+
+    <!-- auto resize -->
+    <section class="common-params">
+      <h2>${t('自动高度', 'Auto Resize')}</h2>
+      <p style="font-size:14px;color:var(--muted);margin-bottom:16px;line-height:1.7">
+        ${t(
+          '嵌入组件会通过 <code>postMessage</code> 自动向父页面报告高度变化。添加以下脚本即可让 iframe 自动适配内容高度，无需手动指定 <code>height</code>。',
+          'Embed widgets automatically report height changes to the parent page via <code>postMessage</code>. Add the following script to let iframes auto-fit their content — no manual <code>height</code> needed.',
+        )}
+      </p>
+      <div class="code-block">
+        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+        <pre><code>${escapeHtml(`<script>
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.source === 'aiusage-embed' && e.data.height) {
+    // Find the iframe matching this widget
+    var frames = document.querySelectorAll('iframe');
+    frames.forEach(function(f) {
+      try {
+        var url = new URL(f.src, location.origin);
+        if (url.searchParams.get('widget') === e.data.widget) {
+          f.style.height = e.data.height + 'px';
+        }
+      } catch(err) {}
+    });
+  }
+});
+</script>`)}</code></pre>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin-top:12px;line-height:1.7">
+        ${t(
+          '消息格式：<code>{ source: "aiusage-embed", widget: "stats-row1", height: 120 }</code>',
+          'Message format: <code>{ source: "aiusage-embed", widget: "stats-row1", height: 120 }</code>',
+        )}
+      </p>
     </section>
   </main>
 
