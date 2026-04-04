@@ -10,6 +10,7 @@ interface ClaudeRecord {
   uuid?: string;
   type?: string;
   cwd?: string;
+  costUSD?: number;
   message?: {
     id?: string;
     model?: string;
@@ -22,6 +23,7 @@ interface ClaudeRecord {
         ephemeral_5m_input_tokens?: number;
         ephemeral_1h_input_tokens?: number;
       };
+      speed?: 'standard' | 'fast';
     };
   };
 }
@@ -34,6 +36,22 @@ interface DeduplicatedUsage {
   cacheWrite1hTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
+  costUSD: number;
+}
+
+function getClaudeProjectDirs(claudeDir?: string): string[] {
+  if (claudeDir) return [claudeDir];
+
+  const envVar = process.env.CLAUDE_CONFIG_DIR?.trim();
+  if (envVar) {
+    return envVar.split(',').map(p => p.trim()).filter(Boolean).map(p => join(p, 'projects'));
+  }
+
+  const home = homedir();
+  return [
+    join(home, '.config', 'claude', 'projects'),
+    join(home, '.claude', 'projects'),
+  ];
 }
 
 export async function scanClaude(
@@ -54,89 +72,94 @@ export async function scanClaudeDates(
   const groupedByDate = new Map<string, Map<string, IngestBreakdown>>();
   for (const targetDate of targetDateSet) groupedByDate.set(targetDate, new Map());
 
-  const baseDir = claudeDir ?? join(homedir(), '.claude', 'projects');
-
-  let projectDirs: string[];
-  try {
-    projectDirs = await readdir(baseDir);
-  } catch {
-    return new Map([...targetDateSet].map((targetDate) => [targetDate, []]));
-  }
+  const baseDirs = getClaudeProjectDirs(claudeDir);
 
   const deduped = new Map<string, DeduplicatedUsage>();
 
-  for (const projDir of projectDirs) {
-    const projectPath = join(baseDir, projDir);
-    const project = resolveProject(projectPath, projectAliases);
-    const dirPath = join(baseDir, projDir);
-
-    const jsonlFiles: string[] = [];
+  for (const baseDir of baseDirs) {
+    let projectDirs: string[];
     try {
-      await walkForJsonl(dirPath, jsonlFiles);
+      projectDirs = await readdir(baseDir);
     } catch {
       continue;
     }
 
-    for (const filePath of jsonlFiles) {
-      let content: string;
+    for (const projDir of projectDirs) {
+      const projectPath = join(baseDir, projDir);
+      const project = resolveProject(projectPath, projectAliases);
+
+      const jsonlFiles: string[] = [];
       try {
-        content = await readFile(filePath, 'utf-8');
+        await walkForJsonl(projectPath, jsonlFiles);
       } catch {
         continue;
       }
 
-      for (const line of content.split('\n')) {
-        if (!line.trim()) continue;
-        let record: ClaudeRecord;
+      for (const filePath of jsonlFiles) {
+        let content: string;
         try {
-          record = JSON.parse(line);
+          content = await readFile(filePath, 'utf-8');
         } catch {
           continue;
         }
 
-        const ts = parseTimestamp(record.timestamp);
-        if (!ts) continue;
-        const usageDate = toDateKey(ts);
-        if (!targetDateSet.has(usageDate)) continue;
+        for (const line of content.split('\n')) {
+          if (!line.trim()) continue;
+          let record: ClaudeRecord;
+          try {
+            record = JSON.parse(line);
+          } catch {
+            continue;
+          }
 
-        const message = record.message;
-        if (!message?.usage) continue;
+          const ts = parseTimestamp(record.timestamp);
+          if (!ts) continue;
+          const usageDate = toDateKey(ts);
+          if (!targetDateSet.has(usageDate)) continue;
 
-        const requestId = record.requestId ?? message.id ?? record.uuid;
-        if (!requestId) continue;
+          const message = record.message;
+          if (!message?.usage) continue;
 
-        const usage = message.usage;
-        const model = normalizeModelName(message.model ?? 'unknown');
-        const recordProject = record.cwd ? resolveProject(record.cwd, projectAliases) : project;
+          const requestId = record.requestId ?? message.id ?? record.uuid;
+          if (!requestId) continue;
 
-        const cacheCreation = usage.cache_creation;
-        let cache5m = cacheCreation?.ephemeral_5m_input_tokens ?? 0;
-        const cache1h = cacheCreation?.ephemeral_1h_input_tokens ?? 0;
-        // 无明细时退化到总量
-        if (cache5m === 0 && cache1h === 0 && (usage.cache_creation_input_tokens ?? 0) > 0) {
-          cache5m = usage.cache_creation_input_tokens!;
-        }
+          const usage = message.usage;
+          let model = normalizeModelName(message.model ?? 'unknown');
+          if (usage.speed === 'fast') model = `${model}-fast`;
+          const recordProject = record.cwd ? resolveProject(record.cwd, projectAliases) : project;
+          const costUSD = record.costUSD ?? 0;
 
-        const dedupeKey = `${usageDate}|${requestId}`;
-        const existing = deduped.get(dedupeKey);
-        if (existing) {
-          // 分别取 max（流式场景下同一 requestId 可能多次出现）
-          existing.model = model;
-          existing.inputTokens = Math.max(existing.inputTokens, usage.input_tokens ?? 0);
-          existing.cacheWrite5mTokens = Math.max(existing.cacheWrite5mTokens, cache5m);
-          existing.cacheWrite1hTokens = Math.max(existing.cacheWrite1hTokens, cache1h);
-          existing.cachedInputTokens = Math.max(existing.cachedInputTokens, usage.cache_read_input_tokens ?? 0);
-          existing.outputTokens = Math.max(existing.outputTokens, usage.output_tokens ?? 0);
-        } else {
-          deduped.set(dedupeKey, {
-            model,
-            project: recordProject,
-            inputTokens: usage.input_tokens ?? 0,
-            cacheWrite5mTokens: cache5m,
-            cacheWrite1hTokens: cache1h,
-            cachedInputTokens: usage.cache_read_input_tokens ?? 0,
-            outputTokens: usage.output_tokens ?? 0,
-          });
+          const cacheCreation = usage.cache_creation;
+          let cache5m = cacheCreation?.ephemeral_5m_input_tokens ?? 0;
+          const cache1h = cacheCreation?.ephemeral_1h_input_tokens ?? 0;
+          // 无明细时退化到总量
+          if (cache5m === 0 && cache1h === 0 && (usage.cache_creation_input_tokens ?? 0) > 0) {
+            cache5m = usage.cache_creation_input_tokens!;
+          }
+
+          const dedupeKey = `${usageDate}|${requestId}`;
+          const existing = deduped.get(dedupeKey);
+          if (existing) {
+            // 分别取 max（流式场景下同一 requestId 可能多次出现）
+            existing.model = model;
+            existing.inputTokens = Math.max(existing.inputTokens, usage.input_tokens ?? 0);
+            existing.cacheWrite5mTokens = Math.max(existing.cacheWrite5mTokens, cache5m);
+            existing.cacheWrite1hTokens = Math.max(existing.cacheWrite1hTokens, cache1h);
+            existing.cachedInputTokens = Math.max(existing.cachedInputTokens, usage.cache_read_input_tokens ?? 0);
+            existing.outputTokens = Math.max(existing.outputTokens, usage.output_tokens ?? 0);
+            existing.costUSD = Math.max(existing.costUSD, costUSD);
+          } else {
+            deduped.set(dedupeKey, {
+              model,
+              project: recordProject,
+              inputTokens: usage.input_tokens ?? 0,
+              cacheWrite5mTokens: cache5m,
+              cacheWrite1hTokens: cache1h,
+              cachedInputTokens: usage.cache_read_input_tokens ?? 0,
+              outputTokens: usage.output_tokens ?? 0,
+              costUSD,
+            });
+          }
         }
       }
     }
@@ -159,6 +182,7 @@ export async function scanClaudeDates(
       existing.cacheWrite5mTokens = (existing.cacheWrite5mTokens ?? 0) + usage.cacheWrite5mTokens;
       existing.cacheWrite1hTokens = (existing.cacheWrite1hTokens ?? 0) + usage.cacheWrite1hTokens;
       existing.outputTokens += usage.outputTokens;
+      existing.costUSD = (existing.costUSD ?? 0) + usage.costUSD;
     } else {
       grouped.set(key, {
         provider: 'anthropic',
@@ -174,6 +198,7 @@ export async function scanClaudeDates(
         cacheWrite1hTokens: usage.cacheWrite1hTokens,
         outputTokens: usage.outputTokens,
         reasoningOutputTokens: 0,
+        costUSD: usage.costUSD,
       });
     }
   }
