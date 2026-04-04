@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import { hostname } from 'node:os';
 import { scanDate, scanDates } from './scan.js';
 import { scanAnthropicApiDates } from './scanners/anthropic-admin-api.js';
+import { scanAnthropicCsvDates } from './scanners/anthropic-csv.js';
 import { buildLocalReport, parseReportRange } from './report.js';
 import { renderReport } from './render.js';
 import {
@@ -80,7 +81,7 @@ try {
     }
   } else if (command === 'import') {
     const parsed = parseArgs(argv.slice(1));
-    await runImport(parsed.flags);
+    await runImport(parsed.flags, parsed.positionals);
   } else if (command === 'setup') {
     console.log('To deploy the server, clone the repo and run the setup wizard:\n');
     console.log('  git clone https://github.com/ennann/aiusage.git');
@@ -330,52 +331,90 @@ async function runSync(flags: Record<string, string | boolean>) {
   }, null, 2));
 }
 
-async function runImport(flags: Record<string, string | boolean>) {
+async function runImport(flags: Record<string, string | boolean>, positionals: string[] = []) {
   const config = await readConfig();
-
-  // Admin key: --key flag takes precedence, then config
-  const adminKey = resolveOptionalString(flags.key, config.anthropicAdminKey);
-  if (!adminKey) {
-    throw new Error(
-      'Anthropic Admin API key required.\n' +
-      '  Option 1: aiusage config set anthropic-admin-key sk-ant-admin...\n' +
-      '  Option 2: aiusage import --key sk-ant-admin... --start DATE --end DATE\n' +
-      '  Get your Admin key at: console.anthropic.com → Settings → Admin Keys',
-    );
-  }
-
-  const startDate = resolveOptionalString(flags.start, undefined);
-  const endDate = resolveOptionalString(flags.end, undefined);
-  if (!startDate) throw new Error('--start DATE is required (e.g. --start 2025-11-01)');
-  if (!endDate) throw new Error('--end DATE is required (e.g. --end 2026-01-08)');
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    throw new Error('Dates must be in YYYY-MM-DD format');
-  }
-  if (startDate > endDate) throw new Error('--start must be before --end');
 
   const targetName = resolveOptionalString(flags.target, undefined);
   const allTargets = config.targets ?? [];
   if (allTargets.length === 0) throw new Error('未配置任何上报目标，请先执行 aiusage enroll');
   const targets = targetName ? [findTargetOrThrow(config, targetName)] : allTargets;
-
   const deviceId = resolveRequiredString(undefined, config.deviceId, '缺少 deviceId，请先执行 enroll');
 
-  console.log(`Fetching Anthropic API usage: ${startDate} → ${endDate}`);
+  // Detect mode: CSV files passed as positional args vs Admin API
+  const csvFiles = positionals.filter(p => p.endsWith('.csv'));
 
-  const dateRange = buildDateRange(startDate, endDate);
-  const apiResults = await scanAnthropicApiDates(dateRange, adminKey);
+  let allDays: Array<{ usageDate: string; breakdowns: import('@aiusage/shared').IngestBreakdown[] }>;
 
-  const allDays = dateRange
-    .map(date => ({ usageDate: date, breakdowns: apiResults.get(date) ?? [] }))
-    .filter(d => d.breakdowns.length > 0);
+  if (csvFiles.length > 0) {
+    // CSV mode: scan all provided files and determine date range from flags or auto-detect
+    console.log(`Importing from ${csvFiles.length} CSV file(s)...`);
 
-  if (allDays.length === 0) {
-    console.log('No usage data returned from Anthropic API for the specified range.');
-    return;
+    // Build date range: if --start/--end specified use those, else scan all dates in files
+    const startDate = resolveOptionalString(flags.start, undefined);
+    const endDate = resolveOptionalString(flags.end, undefined);
+
+    // First pass: collect all dates present across all CSV files
+    let dateRange: string[];
+    if (startDate && endDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+        throw new Error('Dates must be in YYYY-MM-DD format');
+      }
+      if (startDate > endDate) throw new Error('--start must be before --end');
+      dateRange = buildDateRange(startDate, endDate);
+    } else {
+      // Scan with a wide range covering all possible CSV dates (2020–2030)
+      dateRange = buildDateRange('2020-01-01', '2030-12-31');
+    }
+
+    const csvResults = await scanAnthropicCsvDates(dateRange, csvFiles);
+    allDays = dateRange
+      .map(date => ({ usageDate: date, breakdowns: csvResults.get(date) ?? [] }))
+      .filter(d => d.breakdowns.length > 0);
+
+    if (allDays.length === 0) {
+      console.log('No usage data found in the provided CSV files.');
+      return;
+    }
+    console.log(`Found data for ${allDays.length} days across CSV files.`);
+  } else {
+    // Admin API mode
+    const adminKey = resolveOptionalString(flags.key, config.anthropicAdminKey);
+    if (!adminKey) {
+      throw new Error(
+        'Provide CSV files or an Anthropic Admin API key.\n' +
+        '  CSV:  aiusage import /path/to/*.csv\n' +
+        '  API:  aiusage import --key sk-ant-admin... --start DATE --end DATE\n' +
+        '        aiusage config set anthropic-admin-key sk-ant-admin...\n' +
+        '  Download CSVs at: https://platform.claude.com/usage?date=YYYY-MM\n' +
+        '  Get Admin key at: console.anthropic.com → Settings → Admin Keys',
+      );
+    }
+
+    const startDate = resolveOptionalString(flags.start, undefined);
+    const endDate = resolveOptionalString(flags.end, undefined);
+    if (!startDate) throw new Error('--start DATE is required (e.g. --start 2025-11-01)');
+    if (!endDate) throw new Error('--end DATE is required (e.g. --end 2026-01-08)');
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      throw new Error('Dates must be in YYYY-MM-DD format');
+    }
+    if (startDate > endDate) throw new Error('--start must be before --end');
+
+    console.log(`Fetching Anthropic API usage: ${startDate} → ${endDate}`);
+
+    const dateRange = buildDateRange(startDate, endDate);
+    const apiResults = await scanAnthropicApiDates(dateRange, adminKey);
+
+    allDays = dateRange
+      .map(date => ({ usageDate: date, breakdowns: apiResults.get(date) ?? [] }))
+      .filter(d => d.breakdowns.length > 0);
+
+    if (allDays.length === 0) {
+      console.log('No usage data returned from Anthropic API for the specified range.');
+      return;
+    }
+    console.log(`Found data for ${allDays.length} days. Uploading...`);
   }
-
-  console.log(`Found data for ${allDays.length} days. Uploading...`);
 
   for (const target of targets) {
     if (!target.deviceToken) {
