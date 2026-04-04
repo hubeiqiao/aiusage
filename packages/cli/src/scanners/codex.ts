@@ -91,6 +91,7 @@ async function processCodexFile(
 
     let currentModel = 'unknown';
     let currentProject = 'unknown';
+    let previousTotal: TokenUsage = {};
 
     for await (const line of rl) {
       if (!line) continue;
@@ -121,7 +122,7 @@ async function processCodexFile(
       if (record.payload?.type !== 'token_count') continue;
 
       const info = record.payload?.info;
-      if (!info?.last_token_usage || !info?.total_token_usage) continue;
+      if (!info?.total_token_usage) continue;
 
       const ts = parseTimestamp(record.timestamp);
       if (!ts) continue;
@@ -134,7 +135,19 @@ async function processCodexFile(
       if (globalSeenSigs.has(signature)) continue;
       globalSeenSigs.add(signature);
 
-      const last = info.last_token_usage;
+      // Use last_token_usage when available; otherwise compute delta from total_token_usage
+      const last: TokenUsage = info.last_token_usage ?? {
+        input_tokens: Math.max(0, (total.input_tokens ?? 0) - (previousTotal.input_tokens ?? 0)),
+        cached_input_tokens: Math.max(0, (total.cached_input_tokens ?? 0) - (previousTotal.cached_input_tokens ?? 0)),
+        output_tokens: Math.max(0, (total.output_tokens ?? 0) - (previousTotal.output_tokens ?? 0)),
+        reasoning_output_tokens: Math.max(0, (total.reasoning_output_tokens ?? 0) - (previousTotal.reasoning_output_tokens ?? 0)),
+      };
+      previousTotal = total;
+
+      // In Codex JSONL, input_tokens includes cached_input_tokens.
+      // Subtract to get the non-cached portion so cost formula works uniformly.
+      const nonCachedInput = Math.max(0, (last.input_tokens ?? 0) - (last.cached_input_tokens ?? 0));
+
       const grouped = groupedByDate.get(usageDate);
       if (!grouped) continue;
       const key = `${currentModel}|${currentProject}`;
@@ -142,7 +155,7 @@ async function processCodexFile(
       const existing = grouped.get(key);
       if (existing) {
         existing.eventCount += 1;
-        existing.inputTokens += last.input_tokens ?? 0;
+        existing.inputTokens += nonCachedInput;
         existing.cachedInputTokens += last.cached_input_tokens ?? 0;
         existing.outputTokens += last.output_tokens ?? 0;
         existing.reasoningOutputTokens += last.reasoning_output_tokens ?? 0;
@@ -154,7 +167,7 @@ async function processCodexFile(
           model: currentModel,
           project: currentProject,
           eventCount: 1,
-          inputTokens: last.input_tokens ?? 0,
+          inputTokens: nonCachedInput,
           cachedInputTokens: last.cached_input_tokens ?? 0,
           cacheWriteTokens: 0,
           outputTokens: last.output_tokens ?? 0,
@@ -197,7 +210,7 @@ async function walkDir(dir: string, result: string[]): Promise<void> {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       await walkDir(fullPath, result);
-    } else if (entry.name.startsWith('rollout-') && entry.name.endsWith('.jsonl')) {
+    } else if (entry.name.endsWith('.jsonl')) {
       result.push(fullPath);
     }
   }
