@@ -11,7 +11,7 @@ const DAYS = 7;
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const GAMMA = 0.7;
 const MONTH_ROW = 14;
-const LEGEND_ROW = 20;
+const LEGEND_ROW = 30;
 // Less(~22px) gap 5格 gap More(~26px)
 const LEGEND_W = 22 + GAP + 5 * STEP - GAP + GAP + 26;
 
@@ -215,8 +215,8 @@ export function ActivityHeatmap({ days, className = '' }: {
               </g>
             </g>
 
-            {/* 图例：右下角，基于 containerWidth 定位，不参与 offsetX */}
-            <g transform={`translate(${containerWidth - LEGEND_W}, ${totalH - LEGEND_ROW + 4})`}>
+            {/* 图例：居中，与热力图保持间距 */}
+            <g transform={`translate(${(containerWidth - LEGEND_W) / 2}, ${totalH - LEGEND_ROW + 10})`}>
               <text x={0} y={9} fontSize={9} fill={isDark ? '#8b949e' : '#57606a'} fontFamily="system-ui, sans-serif">Less</text>
               {[0, 1, 2, 3, 4].map((lvl) => {
                 const levels = isDark ? DARK_LEVELS : LIGHT_LEVELS;
