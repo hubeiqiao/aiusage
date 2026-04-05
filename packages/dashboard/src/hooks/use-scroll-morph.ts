@@ -4,8 +4,9 @@ const MIN_SCALE = 0.92;
 const MIN_MEDIA_OPACITY = 0.7;
 const SIGMA = 0.4;
 
-const TEXT_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, span.kpi-value, .section-header, pre';
-const MEDIA_SELECTOR = 'img, picture, figure, video, iframe, canvas, hr, .recharts-wrapper, svg[class*="chart"]';
+// Target cards as whole units — they contain KPIs, charts, and section headers
+const TEXT_SELECTOR = '.card, .fade-up, [class*="rounded-xl"]';
+const MEDIA_SELECTOR = '.recharts-wrapper, img, picture, video, canvas';
 
 function getProximity(rect: DOMRect, viewCenter: number, sigmaPixels: number): number {
   const elCenter = rect.top + rect.height / 2;

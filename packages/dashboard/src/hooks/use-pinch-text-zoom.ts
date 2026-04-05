@@ -4,12 +4,12 @@ const MIN_ZOOM = 0.8;
 const MAX_ZOOM = 2.0;
 const ZOOM_STEP = 0.05;
 
-const BLOCK_TEXT = 'p, h1, h2, h3, h4, h5, h6, li, pre';
-const TEXT_SELECTOR = `${BLOCK_TEXT}, [data-zoom-text]`;
+// For dashboard: zoom all cards and section blocks as units
+const ZOOM_TARGETS = '.card, .fade-up, [class*="rounded-xl"]';
 
 function findAnchorElement(container: HTMLElement): { el: HTMLElement; top: number } | null {
   const viewCenter = window.innerHeight / 2;
-  const els = container.querySelectorAll<HTMLElement>(BLOCK_TEXT);
+  const els = container.querySelectorAll<HTMLElement>(ZOOM_TARGETS);
   let best: HTMLElement | null = null;
   let bestDist = Infinity;
 
@@ -26,37 +26,20 @@ function findAnchorElement(container: HTMLElement): { el: HTMLElement; top: numb
   return best ? { el: best, top: best.getBoundingClientRect().top } : null;
 }
 
-function applyZoomToElements(container: HTMLElement, level: number, anchor?: boolean) {
+function applyZoom(container: HTMLElement, level: number, anchor?: boolean) {
   const anchorInfo = anchor ? findAnchorElement(container) : null;
 
-  const els = container.querySelectorAll<HTMLElement>(TEXT_SELECTOR);
+  const els = container.querySelectorAll<HTMLElement>(ZOOM_TARGETS);
   for (let i = 0; i < els.length; i++) {
     const el = els[i];
-    // Skip nested elements (avoid compounding)
-    const ancestorBlock = el.parentElement?.closest(BLOCK_TEXT);
-    if (ancestorBlock && container.contains(ancestorBlock)) {
-      el.style.removeProperty('font-size');
-      el.style.removeProperty('line-height');
-      continue;
-    }
+    // Skip nested targets (avoid compounding)
+    const parent = el.parentElement?.closest(ZOOM_TARGETS);
+    if (parent && container.contains(parent)) continue;
 
     if (level === 1) {
-      el.style.removeProperty('font-size');
-      el.style.removeProperty('line-height');
-      delete el.dataset.origFs;
-      delete el.dataset.origLh;
+      el.style.removeProperty('--zoom-scale');
     } else {
-      if (!el.dataset.origFs) {
-        el.dataset.origFs = getComputedStyle(el).fontSize;
-        el.dataset.origLh = getComputedStyle(el).lineHeight;
-      }
-      const origFs = parseFloat(el.dataset.origFs!);
-      const origLh = parseFloat(el.dataset.origLh!);
-      el.style.fontSize = `${origFs * level}px`;
-      // lineHeight can return "normal" → parseFloat("normal") = NaN
-      if (!isNaN(origLh)) {
-        el.style.lineHeight = `${origLh * level}px`;
-      }
+      el.style.setProperty('--zoom-scale', String(level));
     }
   }
 
@@ -85,14 +68,14 @@ export function usePinchTextZoom() {
   const pinchStartDist = useRef(0);
   const pinchStartZoom = useRef(1);
 
-  const applyZoom = useCallback((level: number) => {
+  const doZoom = useCallback((level: number) => {
     const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, level));
     const stepped = Math.round(clamped / ZOOM_STEP) * ZOOM_STEP;
     setZoomLevel(stepped);
     zoomRef.current = stepped;
     localStorage.setItem('aiusage-text-zoom', String(stepped));
     if (containerRef.current) {
-      applyZoomToElements(containerRef.current, stepped, true);
+      applyZoom(containerRef.current, stepped, true);
     }
   }, []);
 
@@ -112,12 +95,12 @@ export function usePinchTextZoom() {
     if (!container) return;
 
     if (zoomRef.current !== 1) {
-      applyZoomToElements(container, zoomRef.current);
+      applyZoom(container, zoomRef.current);
     }
 
     const observer = new MutationObserver(() => {
       if (zoomRef.current !== 1) {
-        applyZoomToElements(container, zoomRef.current);
+        applyZoom(container, zoomRef.current);
       }
     });
     observer.observe(container, { childList: true, subtree: true });
@@ -158,7 +141,7 @@ export function usePinchTextZoom() {
 
       const dist = getDistance(e.touches);
       const ratio = dist / pinchStartDist.current;
-      applyZoom(pinchStartZoom.current * ratio);
+      doZoom(pinchStartZoom.current * ratio);
       showGesture();
     }
 
@@ -167,7 +150,7 @@ export function usePinchTextZoom() {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-      applyZoom(zoomRef.current + delta);
+      doZoom(zoomRef.current + delta);
       showGesture();
     }
 
@@ -175,15 +158,15 @@ export function usePinchTextZoom() {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
-        applyZoom(zoomRef.current + 0.1);
+        doZoom(zoomRef.current + 0.1);
         showGesture();
       } else if ((e.ctrlKey || e.metaKey) && e.key === '-') {
         e.preventDefault();
-        applyZoom(zoomRef.current - 0.1);
+        doZoom(zoomRef.current - 0.1);
         showGesture();
       } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
         e.preventDefault();
-        applyZoom(1);
+        doZoom(1);
         showGesture();
       }
     }
@@ -209,7 +192,7 @@ export function usePinchTextZoom() {
       document.removeEventListener('gesturechange', onGestureStart);
       clearTimeout(hideTimer.current);
     };
-  }, [applyZoom, showGesture]);
+  }, [doZoom, showGesture]);
 
   return {
     containerRef,
