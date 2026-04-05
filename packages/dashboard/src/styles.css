@@ -159,8 +159,8 @@ body.embed-transparent .card {
   transition: transform 0.15s ease-out;
 }
 
-/* Prevent native pinch zoom on mobile — must be in CSS for iOS Safari */
-html, body {
+/* Prevent native pinch zoom — must cover all elements for iOS Safari */
+html, body, #root {
   touch-action: pan-x pan-y;
 }
 

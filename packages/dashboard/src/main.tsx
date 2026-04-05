@@ -9,9 +9,15 @@ if ('scrollRestoration' in history) {
 }
 window.scrollTo(0, 0);
 
-// Prevent native iOS Safari pinch zoom — gesturestart fires before touchmove
+// Prevent native iOS Safari pinch zoom at document level.
+// iOS ignores user-scalable=no since iOS 10, so we must intercept touch events.
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 document.addEventListener('gesturechange', (e) => e.preventDefault());
+document.addEventListener('touchmove', (e) => {
+  // Block native zoom when 2+ fingers detected — our custom handler in
+  // usePinchTextZoom will handle the zoom via CSS zoom property
+  if (e.touches.length >= 2) e.preventDefault();
+}, { passive: false });
 
 const isEmbed = window.location.pathname.startsWith('/embed') && !window.location.pathname.startsWith('/embed/docs');
 
