@@ -90,7 +90,12 @@ export function useScrollMorph() {
 
       const debugInterval = setInterval(() => {
         const vh = window.innerHeight;
-        const lines: string[] = [`els:${cachedEls.length} scroll:${Math.round(window.scrollY)} vh:${vh} σ:${Math.round(vh * sigma)}`];
+        const mainZoom = document.querySelector('main')?.style.zoom || '-';
+        const contentZoom = document.querySelector('[style*="zoom"]')?.getAttribute('style') || '-';
+        const lines: string[] = [
+          `els:${cachedEls.length} scroll:${Math.round(window.scrollY)} vh:${vh} σ:${Math.round(vh * sigma)}`,
+          `zoom: ${contentZoom.slice(0, 40)}`,
+        ];
         // Show elements near viewport, not just first 6
         let shown = 0;
         for (let i = 0; i < cachedEls.length && shown < 6; i++) {

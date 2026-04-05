@@ -166,18 +166,20 @@ export function usePinchTextZoom() {
     // Prevent Safari's proprietary gesture events
     const onGestureStart = (e: Event) => e.preventDefault();
 
-    container.addEventListener('pointermove', onPointerMove);
-    container.addEventListener('touchstart', onTouchStart, { passive: true });
-    container.addEventListener('touchmove', onTouchMoveHandler, { passive: false });
+    // Touch/gesture handlers on document (not container) — iOS Safari may not
+    // dispatch multi-touch events to elements with touch-action: pan-x pan-y
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('touchstart', onTouchStart, { passive: true });
+    document.addEventListener('touchmove', onTouchMoveHandler, { passive: false });
     container.addEventListener('wheel', onWheel, { passive: false });
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('gesturestart', onGestureStart);
     document.addEventListener('gesturechange', onGestureStart);
 
     return () => {
-      container.removeEventListener('pointermove', onPointerMove);
-      container.removeEventListener('touchstart', onTouchStart);
-      container.removeEventListener('touchmove', onTouchMoveHandler);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('touchstart', onTouchStart);
+      document.removeEventListener('touchmove', onTouchMoveHandler);
       container.removeEventListener('wheel', onWheel);
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('gesturestart', onGestureStart);
