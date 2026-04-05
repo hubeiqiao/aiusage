@@ -16,6 +16,22 @@ AIUsage — 跨设备 AI 工具用量统计平台。Monorepo 结构，pnpm works
 ## 目录约定
 
 - `docs/` — 面向用户的文档（部署指南、更新指南等）
+- `packages/cli/` — CLI 扫描器
+  - `src/scanners/` — 各 AI 工具的扫描器实现（每个工具一个文件）
+  - `src/scanners/__tests__/` — 扫描器单元测试
+  - `src/__tests__/` — CLI 集成测试（report、project、doctor）
+- `packages/dashboard/` — 前端仪表盘
+  - `src/components/` — React 组件
+  - `src/hooks/` — 自定义 Hook
+  - `src/utils/` — 工具函数
+  - `src/embed/` — 嵌入式页面入口
+- `packages/worker/` — Cloudflare Worker 后端
+  - `src/routes/` — API 路由（ingest、overview、breakdowns 等）
+  - `src/utils/` — 定价计算、隐私、鉴权等工具
+  - `migrations/` — D1 数据库迁移文件
+- `packages/shared/` — 跨包共享
+  - `src/types.ts` — 核心数据模型与 API 类型定义
+  - `src/constants.ts` — 共享常量
 
 ## 常用命令
 
