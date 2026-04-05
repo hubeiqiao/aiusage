@@ -72,7 +72,7 @@ function ThemeToggle({ value, onChange, locale }: { value: ThemeMode; onChange: 
             aria-label={o.value}
           >
             <Icon className="h-3.5 w-3.5" />
-            <span>{THEME_LABELS[o.value][locale]}</span>
+            <span className="hidden sm:inline">{THEME_LABELS[o.value][locale]}</span>
           </button>
         );
       })}
@@ -173,6 +173,50 @@ function FilterTabs({
   );
 }
 
+function FilterChips({
+  label,
+  value,
+  options,
+  onChange,
+  allLabel = 'All',
+}: {
+  label: string;
+  value: string;
+  options: FacetOption[];
+  onChange: (v: string) => void;
+  allLabel?: string;
+}) {
+  if (!options.length) return null;
+  const active = 'bg-slate-900 text-white dark:bg-slate-200 dark:text-slate-900';
+  const inactive = 'bg-white text-slate-500 border border-slate-200 dark:bg-[#1a1a1a] dark:text-slate-400 dark:border-white/10';
+  return (
+    <div className="flex items-center gap-2">
+      <span className="shrink-0 text-[12px] font-medium text-slate-400 dark:text-slate-500">{label}</span>
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          onClick={() => onChange('')}
+          className={`rounded-full px-3 py-1 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
+            !value ? active : inactive
+          }`}
+        >
+          {allLabel}
+        </button>
+        {options.map((o) => (
+          <button
+            key={o.value}
+            onClick={() => onChange(o.value === value ? '' : o.value)}
+            className={`rounded-full px-3 py-1 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
+              value === o.value ? active : inactive
+            }`}
+          >
+            {formatProductLabel(o.label)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ────────────────────────────────────────
 // App
 // ────────────────────────────────────────
@@ -253,14 +297,14 @@ export function App() {
 
       {/* ── Header ── */}
       <header className="fade-up relative z-20 py-6 sm:py-8">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center justify-between">
           <h1 className="flex items-center gap-2 text-[22px] font-semibold tracking-tight text-slate-900 dark:text-slate-300">
             <svg viewBox="0 0 200 160" fill="none" className="h-7 w-7" aria-hidden="true">
               <path d="M22 112 C30 112 38 90 44 82 C50 74 54 78 58 88 C62 98 64 116 70 120 C76 124 80 108 86 84 C92 60 96 22 104 16 C112 10 116 36 120 64 C124 92 126 138 134 140 C142 142 146 108 152 72 C158 36 162 14 168 16 C174 18 178 50 182 68" stroke="currentColor" strokeWidth="20" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
             AI Usage
           </h1>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <ThemeToggle value={theme} onChange={setTheme} locale={locale} />
             <LangToggle value={locale} onChange={setLocale} />
             <button
@@ -275,8 +319,8 @@ export function App() {
 
       </header>
 
-        {/* ── Range + Filters ── */}
-        <div className="mt-2 mb-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
+        {/* ── Range + Filters (desktop) ── */}
+        <div className="mt-2 mb-6 hidden sm:flex sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
           <div className="flex items-center gap-2">
             <SegmentedControl
               value={filters.range === 'month' ? '' : filters.range}
@@ -296,29 +340,54 @@ export function App() {
           </div>
           {overview && fOpts.products.length > 1 && (
             <>
-              <div className="hidden h-5 w-px bg-slate-200 dark:bg-[#222222] sm:block" />
-              <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
-                <FilterTabs
-                  value={filters.product}
-                  options={fOpts.products}
-                  allLabel={t.all}
-                  onChange={(v) => setFilters((f) => ({ ...f, product: v }))}
-                />
-              </div>
+              <div className="h-5 w-px bg-slate-200 dark:bg-[#222222]" />
+              <FilterTabs
+                value={filters.product}
+                options={fOpts.products}
+                allLabel={t.all}
+                onChange={(v) => setFilters((f) => ({ ...f, product: v }))}
+              />
             </>
           )}
           {overview && fOpts.devices.length >= 1 && (
             <>
-              <div className="hidden h-5 w-px bg-slate-200 dark:bg-[#222222] sm:block" />
-              <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
-                <FilterTabs
-                  value={filters.deviceId}
-                  options={fOpts.devices}
-                  allLabel={t.all}
-                  onChange={(v) => setFilters((f) => ({ ...f, deviceId: v }))}
-                />
-              </div>
+              <div className="h-5 w-px bg-slate-200 dark:bg-[#222222]" />
+              <FilterTabs
+                value={filters.deviceId}
+                options={fOpts.devices}
+                allLabel={t.all}
+                onChange={(v) => setFilters((f) => ({ ...f, deviceId: v }))}
+              />
             </>
+          )}
+        </div>
+
+        {/* ── Filters (mobile) ── */}
+        <div className="mt-1 mb-5 flex flex-col gap-3 sm:hidden">
+          <FilterChips
+            label=""
+            value={filters.range}
+            options={[...getRanges(t), { value: 'month', label: t.thisMonth }].map((r) => ({ value: r.value, label: r.label, eventCount: 0, estimatedCostUsd: 0 }))}
+            allLabel=""
+            onChange={(v) => setFilters((f) => ({ ...f, range: v || '30d' }))}
+          />
+          {overview && fOpts.products.length > 1 && (
+            <FilterChips
+              label={t.product ?? 'Product'}
+              value={filters.product}
+              options={fOpts.products}
+              allLabel={t.all}
+              onChange={(v) => setFilters((f) => ({ ...f, product: v }))}
+            />
+          )}
+          {overview && fOpts.devices.length >= 1 && (
+            <FilterChips
+              label={t.device ?? 'Device'}
+              value={filters.deviceId}
+              options={fOpts.devices}
+              allLabel={t.all}
+              onChange={(v) => setFilters((f) => ({ ...f, deviceId: v }))}
+            />
           )}
         </div>
 
