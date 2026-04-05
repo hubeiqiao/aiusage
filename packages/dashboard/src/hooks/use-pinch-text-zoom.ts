@@ -26,13 +26,13 @@ function findAnchorElement(container: HTMLElement): { el: HTMLElement; top: numb
 function applyZoom(container: HTMLElement, level: number, anchor?: boolean) {
   const anchorInfo = anchor ? findAnchorElement(container) : null;
 
-  // Use CSS zoom on the container — it affects layout flow so cards
-  // don't overlap. Safe here because dashboard uses divs, not prose
-  // with <strong>/<em> children that trigger Safari font-boosting.
+  // Apply zoom to <html> element — iOS Safari ignores CSS zoom on child divs.
+  // Root-level zoom reliably changes actual text rendering on all browsers.
+  const root = document.documentElement;
   if (level === 1) {
-    container.style.removeProperty('zoom');
+    root.style.removeProperty('zoom');
   } else {
-    container.style.zoom = String(level);
+    root.style.zoom = String(level);
   }
 
   if (anchorInfo) {
