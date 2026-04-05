@@ -78,6 +78,35 @@ export function useScrollMorph() {
     });
     observer.observe(container, { childList: true, subtree: true });
 
+    // Debug mode: append ?debug to URL to see morph values
+    if (window.location.search.includes('debug')) {
+      const panel = document.createElement('div');
+      panel.id = 'morph-debug';
+      panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,0.9);color:#0f0;font:11px monospace;padding:8px;z-index:99999;max-height:30vh;overflow:auto;';
+      document.body.appendChild(panel);
+
+      const debugInterval = setInterval(() => {
+        const lines: string[] = [`els:${cachedEls.length} scroll:${Math.round(window.scrollY)} vh:${window.innerHeight}`];
+        for (let i = 0; i < Math.min(6, cachedEls.length); i++) {
+          const el = cachedEls[i];
+          const s = el.style.getPropertyValue('--morph-scale') || '-';
+          const t = getComputedStyle(el).transform;
+          lines.push(`[${i}] scale:${s} tx:${t.slice(0, 30)}`);
+        }
+        panel.innerHTML = lines.join('<br>');
+      }, 500);
+
+      return () => {
+        clearInterval(debugInterval);
+        panel.remove();
+        cancelAnimationFrame(rafId);
+        window.removeEventListener('scroll', onScroll);
+        window.removeEventListener('resize', onResize);
+        observer.disconnect();
+        for (const el of cachedEls) el.style.removeProperty('--morph-scale');
+      };
+    }
+
     return () => {
       cancelAnimationFrame(rafId);
       window.removeEventListener('scroll', onScroll);
