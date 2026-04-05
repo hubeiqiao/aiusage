@@ -248,13 +248,17 @@ export function App() {
   useCurrencyStore(); // subscribe to re-render on toggle
   const isDark = useIsDark();
 
-  // Immersive reading
+  // Immersive reading: morph on <main>, zoom on content only (not header/filters)
   const { containerRef: morphRef } = useScrollMorph();
   const { containerRef: zoomRef, zoomLevel, isGesturing, gesturePosition } = usePinchTextZoom();
+  const contentRef = useRef<HTMLDivElement>(null);
   const mainRef = useCallback((node: HTMLElement | null) => {
     (morphRef as React.MutableRefObject<HTMLElement | null>).current = node;
-    (zoomRef as React.MutableRefObject<HTMLElement | null>).current = node;
-  }, [morphRef, zoomRef]);
+  }, [morphRef]);
+  // Attach zoom to content grid after render
+  useEffect(() => {
+    (zoomRef as React.MutableRefObject<HTMLElement | null>).current = contentRef.current;
+  }, [zoomRef]);
 
   // Theme
   const [theme, setThemeState] = useState<ThemeMode>(getStoredTheme);
@@ -398,7 +402,8 @@ export function App() {
           )}
         </div>
 
-      {/* ── Content ── */}
+      {/* ── Content (zoom scopes to this wrapper only) ── */}
+      <div ref={contentRef}>
       {loading && !overview ? (
         <div className="grid gap-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -602,6 +607,8 @@ export function App() {
 
         </div>
       )}
+      </div>{/* end content zoom wrapper */}
+
       {/* ── Footer ── */}
       <footer className="fade-up mt-16 border-t border-slate-100 dark:border-white/[0.08] pb-10 pt-8">
         <div className="flex flex-col items-center gap-4">
