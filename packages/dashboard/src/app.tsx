@@ -190,30 +190,35 @@ function FilterChips({
   const active = 'bg-slate-900 text-white dark:bg-slate-200 dark:text-slate-900';
   const inactive = 'bg-white text-slate-500 border border-slate-200 dark:bg-[#1a1a1a] dark:text-slate-400 dark:border-white/10';
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0">
       {label && <span className="shrink-0 text-[12px] font-medium text-slate-400 dark:text-slate-500">{label}</span>}
-      <div className="flex flex-wrap gap-1.5">
-        {allLabel && (
-          <button
-            onClick={() => onChange('')}
-            className={`rounded-full px-3 py-1 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
-              !value ? active : inactive
-            }`}
-          >
-            {allLabel}
-          </button>
-        )}
-        {options.map((o) => (
-          <button
-            key={o.value}
-            onClick={() => onChange(o.value === value ? '' : o.value)}
-            className={`rounded-full px-3 py-1 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
-              value === o.value ? active : inactive
-            }`}
-          >
-            {formatProductLabel(o.label)}
-          </button>
-        ))}
+      <div className="relative min-w-0 flex-1">
+        <div className="overflow-x-auto scrollbar-hide">
+          <div className="flex gap-1.5 w-max pr-4">
+            {allLabel && (
+              <button
+                onClick={() => onChange('')}
+                className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
+                  !value ? active : inactive
+                }`}
+              >
+                {allLabel}
+              </button>
+            )}
+            {options.map((o) => (
+              <button
+                key={o.value}
+                onClick={() => onChange(o.value === value ? '' : o.value)}
+                className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
+                  value === o.value ? active : inactive
+                }`}
+              >
+                {formatProductLabel(o.label)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#fafafa] dark:from-[#0a0a0a]" />
       </div>
     </div>
   );
