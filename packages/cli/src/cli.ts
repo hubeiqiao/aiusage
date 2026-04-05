@@ -268,6 +268,8 @@ async function runSync(flags: Record<string, string | boolean>) {
     targetDates = [requestedDate];
   } else if (fromDate) {
     targetDates = buildDateRange(fromDate, toDate ?? getTodayDate());
+  } else if (flags.today === true) {
+    targetDates = [getTodayDate()];
   } else {
     const lookbackDays = typeof flags.lookback === 'string'
       ? parsePositiveInt(flags.lookback, '--lookback')
