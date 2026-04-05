@@ -1,9 +1,11 @@
 import { useRef, useEffect } from 'react';
 
-const MIN_SCALE = 0.92;
 const SIGMA = 0.4;
 
-// Target only .card elements — the leaf visual blocks of the dashboard
+// More dramatic fisheye on mobile where cards fill the screen
+const MIN_SCALE_DESKTOP = 0.92;
+const MIN_SCALE_MOBILE = 0.85;
+
 const MORPH_SELECTOR = '.card';
 
 function getProximity(rect: DOMRect, viewCenter: number, sigmaPixels: number): number {
@@ -21,6 +23,7 @@ export function useScrollMorph() {
 
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
+    const minScale = window.innerWidth < 640 ? MIN_SCALE_MOBILE : MIN_SCALE_DESKTOP;
     let rafId = 0;
     let lastScrollY = window.scrollY;
     let cachedEls: HTMLElement[] = [];
@@ -42,7 +45,7 @@ export function useScrollMorph() {
         if (rect.bottom < -100 || rect.top > viewportH + 100) continue;
 
         const proximity = getProximity(rect, viewCenter, sigmaPixels);
-        const scale = MIN_SCALE + (1 - MIN_SCALE) * proximity;
+        const scale = minScale + (1 - minScale) * proximity;
         el.style.setProperty('--morph-scale', scale.toFixed(3));
       }
     };
