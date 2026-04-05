@@ -9,6 +9,10 @@ if ('scrollRestoration' in history) {
 }
 window.scrollTo(0, 0);
 
+// Prevent native iOS Safari pinch zoom — gesturestart fires before touchmove
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('gesturechange', (e) => e.preventDefault());
+
 const isEmbed = window.location.pathname.startsWith('/embed') && !window.location.pathname.startsWith('/embed/docs');
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
