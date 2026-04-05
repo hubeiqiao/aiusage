@@ -191,16 +191,18 @@ function FilterChips({
   const inactive = 'bg-white text-slate-500 border border-slate-200 dark:bg-[#1a1a1a] dark:text-slate-400 dark:border-white/10';
   return (
     <div className="flex items-center gap-2">
-      <span className="shrink-0 text-[12px] font-medium text-slate-400 dark:text-slate-500">{label}</span>
+      {label && <span className="shrink-0 text-[12px] font-medium text-slate-400 dark:text-slate-500">{label}</span>}
       <div className="flex flex-wrap gap-1.5">
-        <button
-          onClick={() => onChange('')}
-          className={`rounded-full px-3 py-1 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
-            !value ? active : inactive
-          }`}
-        >
-          {allLabel}
-        </button>
+        {allLabel && (
+          <button
+            onClick={() => onChange('')}
+            className={`rounded-full px-3 py-1 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
+              !value ? active : inactive
+            }`}
+          >
+            {allLabel}
+          </button>
+        )}
         {options.map((o) => (
           <button
             key={o.value}
