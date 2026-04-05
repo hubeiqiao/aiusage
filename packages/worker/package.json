@@ -18,7 +18,7 @@
     "build": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "types": "wrangler types",
-    "test": "echo 'no tests yet'",
+    "test": "vitest run",
     "db:migrate:local": "wrangler d1 execute aiusage-db --local --file=migrations/0001_init.sql",
     "db:migrate:remote": "wrangler d1 execute aiusage-db --remote --file=migrations/0001_init.sql"
   },
@@ -29,6 +29,7 @@
   "devDependencies": {
     "@types/node": "^22",
     "typescript": "^5",
+    "vitest": "^4.1.2",
     "wrangler": "^4.80.0"
   }
 }
