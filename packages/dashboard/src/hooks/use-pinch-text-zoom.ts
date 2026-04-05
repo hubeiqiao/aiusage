@@ -4,12 +4,9 @@ const MIN_ZOOM = 0.8;
 const MAX_ZOOM = 2.0;
 const ZOOM_STEP = 0.05;
 
-// Only target .card — the leaf visual blocks (not grid wrappers like .fade-up)
-const ZOOM_TARGETS = '.card';
-
 function findAnchorElement(container: HTMLElement): { el: HTMLElement; top: number } | null {
   const viewCenter = window.innerHeight / 2;
-  const els = container.querySelectorAll<HTMLElement>(ZOOM_TARGETS);
+  const els = container.querySelectorAll<HTMLElement>('.card');
   let best: HTMLElement | null = null;
   let bestDist = Infinity;
 
@@ -29,18 +26,13 @@ function findAnchorElement(container: HTMLElement): { el: HTMLElement; top: numb
 function applyZoom(container: HTMLElement, level: number, anchor?: boolean) {
   const anchorInfo = anchor ? findAnchorElement(container) : null;
 
-  const els = container.querySelectorAll<HTMLElement>(ZOOM_TARGETS);
-  for (let i = 0; i < els.length; i++) {
-    const el = els[i];
-    // Skip nested targets (avoid compounding)
-    const parent = el.parentElement?.closest(ZOOM_TARGETS);
-    if (parent && container.contains(parent)) continue;
-
-    if (level === 1) {
-      el.style.removeProperty('--zoom-scale');
-    } else {
-      el.style.setProperty('--zoom-scale', String(level));
-    }
+  // Use CSS zoom on the container — it affects layout flow so cards
+  // don't overlap. Safe here because dashboard uses divs, not prose
+  // with <strong>/<em> children that trigger Safari font-boosting.
+  if (level === 1) {
+    container.style.removeProperty('zoom');
+  } else {
+    container.style.zoom = String(level);
   }
 
   if (anchorInfo) {
