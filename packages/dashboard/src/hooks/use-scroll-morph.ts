@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react';
 
-const SIGMA = 0.4;
+const SIGMA_DESKTOP = 0.4;
+const SIGMA_MOBILE = 0.18; // Tighter curve so adjacent cards differ visibly
 
 // More dramatic fisheye on mobile where cards fill the screen
 const MIN_SCALE_DESKTOP = 0.92;
@@ -26,7 +27,9 @@ export function useScrollMorph() {
 
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-    const minScale = window.innerWidth < 640 ? MIN_SCALE_MOBILE : MIN_SCALE_DESKTOP;
+    const isMobile = window.innerWidth < 640;
+    const minScale = isMobile ? MIN_SCALE_MOBILE : MIN_SCALE_DESKTOP;
+    const sigma = isMobile ? SIGMA_MOBILE : SIGMA_DESKTOP;
     let rafId = 0;
     let lastScrollY = window.scrollY;
     let cachedEls: HTMLElement[] = [];
@@ -39,7 +42,7 @@ export function useScrollMorph() {
     const update = () => {
       const viewportH = window.innerHeight;
       const viewCenter = viewportH / 2;
-      const sigmaPixels = viewportH * SIGMA;
+      const sigmaPixels = viewportH * sigma;
 
       for (let i = 0; i < cachedEls.length; i++) {
         const el = cachedEls[i];
@@ -86,12 +89,17 @@ export function useScrollMorph() {
       document.body.appendChild(panel);
 
       const debugInterval = setInterval(() => {
-        const lines: string[] = [`els:${cachedEls.length} scroll:${Math.round(window.scrollY)} vh:${window.innerHeight}`];
-        for (let i = 0; i < Math.min(6, cachedEls.length); i++) {
+        const vh = window.innerHeight;
+        const lines: string[] = [`els:${cachedEls.length} scroll:${Math.round(window.scrollY)} vh:${vh} σ:${Math.round(vh * sigma)}`];
+        // Show elements near viewport, not just first 6
+        let shown = 0;
+        for (let i = 0; i < cachedEls.length && shown < 6; i++) {
           const el = cachedEls[i];
+          const rect = el.getBoundingClientRect();
+          if (rect.bottom < -50 || rect.top > vh + 50) continue;
           const s = el.style.getPropertyValue('--morph-scale') || '-';
-          const t = getComputedStyle(el).transform;
-          lines.push(`[${i}] scale:${s} tx:${t.slice(0, 30)}`);
+          lines.push(`[${i}] y:${Math.round(rect.top)} scale:${s}`);
+          shown++;
         }
         panel.innerHTML = lines.join('<br>');
       }, 500);
