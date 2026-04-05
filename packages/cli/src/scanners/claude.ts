@@ -25,6 +25,7 @@ interface ClaudeRecord {
   timestamp?: string;
   requestId?: string;
   uuid?: string;
+  sessionId?: string;
   type?: string;
   cwd?: string;
   costUSD?: number;
@@ -87,6 +88,9 @@ export async function scanClaudeDates(
   // JSONL files with identical token counts.
   const processedHashes = new Set<string>();
 
+  // Track distinct sessions per "date|model|project" group
+  const sessionSets = new Map<string, Set<string>>();
+
   // 收集所有 { filePath, project } 对
   const fileJobs: { filePath: string; project: string }[] = [];
 
@@ -117,7 +121,7 @@ export async function scanClaudeDates(
 
   // 并发流式处理文件，直接聚合到 groupedByDate
   await runWithConcurrency(fileJobs, FILE_CONCURRENCY, async (job) => {
-    await processJsonlFile(job.filePath, job.project, targetDateSet, projectAliases, groupedByDate, processedHashes);
+    await processJsonlFile(job.filePath, job.project, targetDateSet, projectAliases, groupedByDate, processedHashes, sessionSets);
   });
 
   // For dates that have no JSONL data, fall back to stats-cache.json.
@@ -136,6 +140,14 @@ export async function scanClaudeDates(
     }
   }
 
+  // Assign session counts from collected sessionSets
+  for (const [usageDate, grouped] of groupedByDate.entries()) {
+    for (const [key, breakdown] of grouped.entries()) {
+      const sessionSetKey = `${usageDate}|${key}`;
+      breakdown.sessionCount = sessionSets.get(sessionSetKey)?.size ?? 0;
+    }
+  }
+
   return new Map(
     [...groupedByDate.entries()].map(([usageDate, grouped]) => [usageDate, [...grouped.values()]]),
   );
@@ -149,7 +161,10 @@ async function processJsonlFile(
   projectAliases: Record<string, string> | undefined,
   groupedByDate: Map<string, Map<string, IngestBreakdown>>,
   processedHashes: Set<string>,
+  sessionSets: Map<string, Set<string>>,
 ): Promise<void> {
+  // Derive fallback sessionId from filename (e.g. "abc-123.jsonl" → "abc-123")
+  const fallbackSessionId = filePath.replace(/^.*[\\/]/, '').replace(/\.jsonl$/, '');
   let fh;
   try {
     fh = await open(filePath, 'r');
@@ -204,6 +219,7 @@ async function processJsonlFile(
       let model = normalizeModelName(rawModel);
       if (usage.speed === 'fast') model = `${model}-fast`;
       const recordProject = record.cwd ? resolveProject(record.cwd, projectAliases) : fallbackProject;
+      const sessionId = record.sessionId ?? fallbackSessionId;
       const costUSD = record.costUSD ?? 0;
 
       const cacheCreation = usage.cache_creation;
@@ -219,6 +235,12 @@ async function processJsonlFile(
 
       const cacheWriteTokens = cache5m + cache1h;
       const key = `${model}|${recordProject}`;
+
+      // Track distinct sessions per group
+      const sessionSetKey = `${usageDate}|${key}`;
+      if (!sessionSets.has(sessionSetKey)) sessionSets.set(sessionSetKey, new Set());
+      sessionSets.get(sessionSetKey)!.add(sessionId);
+
       const existing = grouped.get(key);
       if (existing) {
         existing.eventCount += 1;

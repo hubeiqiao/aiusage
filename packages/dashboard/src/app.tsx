@@ -379,7 +379,11 @@ export function App() {
               />
             </div>
             <div className="card">
-              <KpiCard label={t.sessions} value={formatNumber(overview?.totalEvents ?? 0)} />
+              <KpiCard
+                label={t.sessions}
+                value={formatNumber((overview?.totalSessions ?? 0) > 0 ? overview!.totalSessions : (overview?.totalEvents ?? 0))}
+                suffix={(overview?.totalSessions ?? 0) > 0 && overview!.totalSessions !== overview!.totalEvents ? ` / ${formatNumber(overview!.totalEvents)}` : undefined}
+              />
             </div>
             <div className="card">
               <KpiCard label={t.costPerSession} value={unavailable ? t.unavailable : formatUsd(kpis?.costPerSession ?? 0)} />
@@ -395,6 +399,12 @@ export function App() {
           {unavailable && (
             <div className="fade-up rounded-xl border border-amber-200/80 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-900 dark:border-amber-950/60 dark:bg-amber-950/20 dark:text-amber-200">
               <span className="font-medium">{t.eventOnlySource}.</span> {t.eventOnlyNotice}
+            </div>
+          )}
+
+          {!unavailable && (filters.product === '' || filters.product === 'claude-code') && (
+            <div className="fade-up rounded-xl border border-blue-200/80 bg-blue-50/70 px-4 py-3 text-[13px] text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200">
+              {t.claudeCodeDataNotice}
             </div>
           )}
 
