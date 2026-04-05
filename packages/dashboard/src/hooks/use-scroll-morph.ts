@@ -6,7 +6,10 @@ const SIGMA = 0.4;
 const MIN_SCALE_DESKTOP = 0.92;
 const MIN_SCALE_MOBILE = 0.85;
 
-const MORPH_SELECTOR = '.card';
+// Target inner content of cards, not the card wrapper itself.
+// Card wrapper scaling is invisible because borders/padding scale too.
+// Text content scaling with left-center origin creates the visible fisheye.
+const MORPH_SELECTOR = '.card > div, .card > h2, .card .recharts-wrapper, .card svg:not([class*="lucide"])';
 
 function getProximity(rect: DOMRect, viewCenter: number, sigmaPixels: number): number {
   const elCenter = rect.top + rect.height / 2;

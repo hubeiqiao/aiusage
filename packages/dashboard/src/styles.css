@@ -149,10 +149,13 @@ body.embed-transparent .card {
 }
 
 /* ── Scroll morph (fisheye) ── */
-/* Only .card elements — the leaf visual blocks, not grid wrappers */
-.prose-immersive .card {
+/* Inner content of cards — text grows from left edge like Joe's site */
+.prose-immersive .card > div,
+.prose-immersive .card > h2,
+.prose-immersive .card .recharts-wrapper,
+.prose-immersive .card svg:not([class*="lucide"]) {
   transform: scale(var(--morph-scale, 1));
-  transform-origin: center center;
+  transform-origin: left center;
   transition: transform 0.15s ease-out;
 }
 
