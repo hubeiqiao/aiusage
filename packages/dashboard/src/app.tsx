@@ -182,6 +182,13 @@ export function App() {
   useFetchCnyRate();
   useCurrencyStore(); // subscribe to re-render on toggle
   const isDark = useIsDark();
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const h = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
 
   // Theme
   const [theme, setThemeState] = useState<ThemeMode>(getStoredTheme);
@@ -432,7 +439,7 @@ export function App() {
                   <div className="my-5 border-t border-slate-100 dark:border-white/[0.08]" />
                   <DonutSection
                     title={t.modelShare}
-                    data={(overview?.modelCostShare ?? []).map((m) => ({ ...m, label: formatModelName(m.label) }))}
+                    data={(overview?.modelCostShare ?? []).map((m) => ({ ...m, label: formatModelName(m.label, isMobile) }))}
                     colors={getChartColors(isDark)}
                     centerLabel={formatUsd(overview?.totalCostUsd ?? 0)}
                   />
