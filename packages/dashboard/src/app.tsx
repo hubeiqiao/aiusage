@@ -248,12 +248,13 @@ export function App() {
   useCurrencyStore(); // subscribe to re-render on toggle
   const isDark = useIsDark();
 
-  // Immersive reading: morph on <main>, zoom on content area only (not header/filters)
+  // Immersive reading
   const { containerRef: morphRef } = useScrollMorph();
   const { containerRef: zoomRef, zoomLevel, isGesturing, gesturePosition } = usePinchTextZoom();
   const mainRef = useCallback((node: HTMLElement | null) => {
     (morphRef as React.MutableRefObject<HTMLElement | null>).current = node;
-  }, [morphRef]);
+    (zoomRef as React.MutableRefObject<HTMLElement | null>).current = node;
+  }, [morphRef, zoomRef]);
 
   // Theme
   const [theme, setThemeState] = useState<ThemeMode>(getStoredTheme);
@@ -397,8 +398,7 @@ export function App() {
           )}
         </div>
 
-      {/* ── Content (zoom applies here, not to header/filters) ── */}
-      <div ref={(node) => { (zoomRef as React.MutableRefObject<HTMLElement | null>).current = node; }}>
+      {/* ── Content ── */}
       {loading && !overview ? (
         <div className="grid gap-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -602,8 +602,6 @@ export function App() {
 
         </div>
       )}
-      </div>{/* end zoom wrapper */}
-
       {/* ── Footer ── */}
       <footer className="fade-up mt-16 border-t border-slate-100 dark:border-white/[0.08] pb-10 pt-8">
         <div className="flex flex-col items-center gap-4">

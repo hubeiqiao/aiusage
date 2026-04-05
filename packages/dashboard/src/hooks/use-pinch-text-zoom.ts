@@ -4,6 +4,10 @@ const MIN_ZOOM = 0.8;
 const MAX_ZOOM = 2.0;
 const ZOOM_STEP = 0.05;
 
+// All text-containing elements — query broadly, scale font-size per element
+// This is the only approach that works reliably on iOS Safari
+const TEXT_SELECTOR = 'h1, h2, h3, h4, h5, h6, p, span, div, button, a, li, time, label';
+
 function findAnchorElement(container: HTMLElement): { el: HTMLElement; top: number } | null {
   const viewCenter = window.innerHeight / 2;
   const els = container.querySelectorAll<HTMLElement>('.card');
@@ -26,13 +30,53 @@ function findAnchorElement(container: HTMLElement): { el: HTMLElement; top: numb
 function applyZoom(container: HTMLElement, level: number, anchor?: boolean) {
   const anchorInfo = anchor ? findAnchorElement(container) : null;
 
-  // Apply zoom to <html> element — iOS Safari ignores CSS zoom on child divs.
-  // Root-level zoom reliably changes actual text rendering on all browsers.
-  const root = document.documentElement;
-  if (level === 1) {
-    root.style.removeProperty('zoom');
-  } else {
-    root.style.zoom = String(level);
+  // Per-element font-size + line-height scaling.
+  // CSS zoom doesn't work on iOS Safari (ignored on child divs, viewport
+  // cancels it on <html>). Directly changing font-size is the only reliable
+  // cross-browser approach — matches Joe's reference implementation.
+  const els = container.querySelectorAll<HTMLElement>(TEXT_SELECTOR);
+  for (let i = 0; i < els.length; i++) {
+    const el = els[i];
+    // Only scale leaf-ish elements that have direct text content
+    // Skip elements whose text comes entirely from children
+    if (!el.childNodes.length) continue;
+
+    if (level === 1) {
+      el.style.removeProperty('font-size');
+      el.style.removeProperty('line-height');
+      delete el.dataset.origFs;
+      delete el.dataset.origLh;
+    } else {
+      if (!el.dataset.origFs) {
+        const cs = getComputedStyle(el);
+        el.dataset.origFs = cs.fontSize;
+        el.dataset.origLh = cs.lineHeight;
+      }
+      const origFs = parseFloat(el.dataset.origFs!);
+      const origLh = parseFloat(el.dataset.origLh!);
+      el.style.fontSize = `${origFs * level}px`;
+      if (!isNaN(origLh)) el.style.lineHeight = `${origLh * level}px`;
+    }
+  }
+
+  // Also scale SVG icons proportionally
+  const svgs = container.querySelectorAll<SVGElement>('svg');
+  for (let i = 0; i < svgs.length; i++) {
+    const svg = svgs[i];
+    if (level === 1) {
+      svg.style.removeProperty('width');
+      svg.style.removeProperty('height');
+      delete svg.dataset.origW;
+      delete svg.dataset.origH;
+    } else {
+      if (!svg.dataset.origW) {
+        const rect = svg.getBoundingClientRect();
+        svg.dataset.origW = String(rect.width);
+        svg.dataset.origH = String(rect.height);
+      }
+      svg.style.width = `${parseFloat(svg.dataset.origW!) * level}px`;
+      svg.style.height = `${parseFloat(svg.dataset.origH!) * level}px`;
+    }
   }
 
   if (anchorInfo) {
@@ -166,8 +210,8 @@ export function usePinchTextZoom() {
     // Prevent Safari's proprietary gesture events
     const onGestureStart = (e: Event) => e.preventDefault();
 
-    // Touch/gesture handlers on document (not container) — iOS Safari may not
-    // dispatch multi-touch events to elements with touch-action: pan-x pan-y
+    // Touch handlers on document — iOS Safari may not dispatch multi-touch
+    // events to elements with touch-action: pan-x pan-y
     document.addEventListener('pointermove', onPointerMove);
     document.addEventListener('touchstart', onTouchStart, { passive: true });
     document.addEventListener('touchmove', onTouchMoveHandler, { passive: false });
