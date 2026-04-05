@@ -2,11 +2,9 @@ import { useRef, useEffect } from 'react';
 
 const SIGMA = 0.4;
 
-// Scale range: edges shrink, center grows above 1.0 for visible "grow" effect
-const MAX_SCALE_DESKTOP = 1.03;
+// More dramatic fisheye on mobile where cards fill the screen
 const MIN_SCALE_DESKTOP = 0.92;
-const MAX_SCALE_MOBILE = 1.06;
-const MIN_SCALE_MOBILE = 0.88;
+const MIN_SCALE_MOBILE = 0.85;
 
 // Target inner content of cards, not the card wrapper itself.
 // Card wrapper scaling is invisible because borders/padding scale too.
@@ -28,9 +26,7 @@ export function useScrollMorph() {
 
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-    const isMobile = window.innerWidth < 640;
-    const minScale = isMobile ? MIN_SCALE_MOBILE : MIN_SCALE_DESKTOP;
-    const maxScale = isMobile ? MAX_SCALE_MOBILE : MAX_SCALE_DESKTOP;
+    const minScale = window.innerWidth < 640 ? MIN_SCALE_MOBILE : MIN_SCALE_DESKTOP;
     let rafId = 0;
     let lastScrollY = window.scrollY;
     let cachedEls: HTMLElement[] = [];
@@ -52,7 +48,7 @@ export function useScrollMorph() {
         if (rect.bottom < -100 || rect.top > viewportH + 100) continue;
 
         const proximity = getProximity(rect, viewCenter, sigmaPixels);
-        const scale = minScale + (maxScale - minScale) * proximity;
+        const scale = minScale + (1 - minScale) * proximity;
         el.style.setProperty('--morph-scale', scale.toFixed(3));
       }
     };
