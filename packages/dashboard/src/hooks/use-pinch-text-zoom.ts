@@ -3,7 +3,6 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 const MIN_ZOOM = 0.8;
 const MAX_ZOOM = 2.0;
 const ZOOM_STEP = 0.05;
-const MOBILE_BREAKPOINT = 640;
 
 function findAnchorElement(container: HTMLElement): { el: HTMLElement; top: number } | null {
   const viewCenter = window.innerHeight / 2;
@@ -44,14 +43,10 @@ function applyZoom(container: HTMLElement, level: number, anchor?: boolean) {
   }
 }
 
-function isMobile() {
-  return typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT;
-}
-
 export function usePinchTextZoom() {
   const containerRef = useRef<HTMLElement | null>(null);
   const [zoomLevel, setZoomLevel] = useState(() => {
-    if (typeof window === 'undefined' || isMobile()) return 1;
+    if (typeof window === 'undefined') return 1;
     const stored = parseFloat(localStorage.getItem('aiusage-text-zoom') ?? '1');
     return isNaN(stored) ? 1 : Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, stored));
   });
@@ -86,10 +81,10 @@ export function usePinchTextZoom() {
     }, 800);
   }, []);
 
-  // Initial zoom application + MutationObserver (desktop only)
+  // Initial zoom application + MutationObserver
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || isMobile()) return;
+    if (!container) return;
 
     if (zoomRef.current !== 1) {
       applyZoom(container, zoomRef.current);
@@ -105,10 +100,10 @@ export function usePinchTextZoom() {
     return () => observer.disconnect();
   }, []);
 
-  // Gesture handling: pinch, Ctrl+wheel, keyboard (desktop only)
+  // Gesture handling: pinch, Ctrl+wheel, keyboard
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || isMobile()) return;
+    if (!container) return;
 
     const onPointerMove = (e: PointerEvent) => {
       pointerPos.current = { x: e.clientX, y: e.clientY };
