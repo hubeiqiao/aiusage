@@ -2,7 +2,8 @@
 
 `@aiusage/cli` is the AIUsage command-line tool for:
 
-- scanning local Claude Code and Codex token usage
+- discovering and managing projects across AI tools
+- scanning local Claude Code, Codex, Cursor, Copilot CLI, Copilot for VS Code, Gemini CLI, and Antigravity usage
 - printing local usage summaries for the last 7 days, 30 days, 90 days, or all history
 - scheduling automatic sync to an AIUsage Worker
 - diagnosing configuration and connectivity issues
@@ -27,6 +28,22 @@ aiusage --help
 
 ## Commands
 
+### project
+
+Discover and manage projects on this machine.
+
+```bash
+aiusage project                         # list all discovered projects (default)
+aiusage project list                    # same as above
+aiusage project alias myapp "我的应用"   # set alias for a project
+aiusage project alias                   # list all configured aliases
+aiusage project alias --remove myapp    # remove alias
+```
+
+Scans data directories for Claude Code, Codex, Cursor, Copilot CLI, Copilot for VS Code, Gemini CLI, and Antigravity, listing discovered projects with their aliases and sources.
+
+Project aliases are applied locally before upload. If two devices set the same alias for their respective project directories, the server merges them into one project.
+
 ### report
 
 Local usage report. No cloud upload required.
@@ -42,7 +59,7 @@ aiusage report --no-emoji               # disable emoji in title
 aiusage report --json                   # JSON output
 ```
 
-Reads data from `~/.claude/projects` (Claude Code) and `~/.codex` (Codex).
+Reads data from local tool data directories including `~/.claude/projects` (Claude Code), `~/.codex` (Codex), Cursor local state plus usage export, VS Code Copilot Chat logs, and `~/.gemini/antigravity` (Antigravity).
 
 **Compact mode** (default) shows Sources and Daily tables with merged Cache column and 2-decimal cost. **Detail mode** (`--detail`) expands all columns (CacheRead, CacheWrite, Reasoning), adds Top Models and Pricing Notes sections, and shows 4-decimal cost.
 
@@ -129,7 +146,7 @@ aiusage config set lang zh                              # default language: en o
 aiusage config set emoji false                          # disable emoji in report title
 aiusage config set device.alias "MacBook Pro 工作机"
 aiusage config set privacy.projectVisibility masked
-aiusage config set project.alias /Users/me/Projects/MyApp MyApp
+aiusage config set project.alias MyApp "我的应用"  # prefer: aiusage project alias
 ```
 
 CLI flags (`--lang`, `--no-emoji`) override config values for a single run.

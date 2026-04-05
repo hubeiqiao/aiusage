@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { hostname } from 'node:os';
 import { scanDate, scanDates } from './scan.js';
+import { scanAnthropicApiDates } from './scanners/anthropic-admin-api.js';
+import { scanAnthropicCsvDates } from './scanners/anthropic-csv.js';
 import { buildLocalReport, parseReportRange } from './report.js';
 import { renderReport } from './render.js';
 import {
@@ -20,6 +22,7 @@ import { defaultLookbackDays, enrollDevice, fetchHealth, uploadDailyUsage } from
 import { disableSchedule, enableSchedule, formatInterval, getScheduleStatus, parseInterval } from './schedule.js';
 import { runDoctor } from './doctor.js';
 import { getVersion } from './version.js';
+import { discoverProjects } from './project.js';
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -65,14 +68,33 @@ try {
     await runDoctorCommand(parsed.flags);
   } else if (command === 'config' && argv[1] === 'set') {
     await runConfigSet(argv.slice(2));
+  } else if (command === 'project') {
+    const sub = argv[1];
+    if (sub === 'list' || sub === undefined) {
+      await runProjectList();
+    } else if (sub === 'alias') {
+      await runProjectAlias(argv.slice(2));
+    } else {
+      console.error(`未知子命令: project ${sub}`);
+      console.log('可用: aiusage project list, aiusage project alias <项目名> <别名>');
+      process.exitCode = 1;
+    }
+  } else if (command === 'import') {
+    const parsed = parseArgs(argv.slice(1));
+    await runImport(parsed.flags, parsed.positionals);
   } else if (command === 'setup') {
     console.log('To deploy the server, clone the repo and run the setup wizard:\n');
     console.log('  git clone https://github.com/ennann/aiusage.git');
     console.log('  cd aiusage && pnpm install');
     console.log('  pnpm setup\n');
     console.log('See: https://github.com/ennann/aiusage#deploy-your-own-server');
-  } else {
+  } else if (command === '--help' || command === '-h' || command === 'help') {
     printHelp();
+  } else {
+    if (command) {
+      console.error(`未知命令: "${command}"\n`);
+    }
+    printUsageHint();
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
@@ -309,6 +331,114 @@ async function runSync(flags: Record<string, string | boolean>) {
   }, null, 2));
 }
 
+async function runImport(flags: Record<string, string | boolean>, positionals: string[] = []) {
+  const config = await readConfig();
+
+  const targetName = resolveOptionalString(flags.target, undefined);
+  const allTargets = config.targets ?? [];
+  if (allTargets.length === 0) throw new Error('未配置任何上报目标，请先执行 aiusage enroll');
+  const targets = targetName ? [findTargetOrThrow(config, targetName)] : allTargets;
+  const deviceId = resolveRequiredString(undefined, config.deviceId, '缺少 deviceId，请先执行 enroll');
+
+  // Detect mode: CSV files passed as positional args vs Admin API
+  const csvFiles = positionals.filter(p => p.endsWith('.csv'));
+
+  let allDays: Array<{ usageDate: string; breakdowns: import('@aiusage/shared').IngestBreakdown[] }>;
+
+  if (csvFiles.length > 0) {
+    // CSV mode: scan all provided files and determine date range from flags or auto-detect
+    console.log(`Importing from ${csvFiles.length} CSV file(s)...`);
+
+    // Build date range: if --start/--end specified use those, else scan all dates in files
+    const startDate = resolveOptionalString(flags.start, undefined);
+    const endDate = resolveOptionalString(flags.end, undefined);
+
+    // First pass: collect all dates present across all CSV files
+    let dateRange: string[];
+    if (startDate && endDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+        throw new Error('Dates must be in YYYY-MM-DD format');
+      }
+      if (startDate > endDate) throw new Error('--start must be before --end');
+      dateRange = buildDateRange(startDate, endDate);
+    } else {
+      // Scan with a wide range covering all possible CSV dates (2020–2030)
+      dateRange = buildDateRange('2020-01-01', '2030-12-31');
+    }
+
+    const csvResults = await scanAnthropicCsvDates(dateRange, csvFiles);
+    allDays = dateRange
+      .map(date => ({ usageDate: date, breakdowns: csvResults.get(date) ?? [] }))
+      .filter(d => d.breakdowns.length > 0);
+
+    if (allDays.length === 0) {
+      console.log('No usage data found in the provided CSV files.');
+      return;
+    }
+    console.log(`Found data for ${allDays.length} days across CSV files.`);
+  } else {
+    // Admin API mode
+    const adminKey = resolveOptionalString(flags.key, config.anthropicAdminKey);
+    if (!adminKey) {
+      throw new Error(
+        'Provide CSV files or an Anthropic Admin API key.\n' +
+        '  CSV:  aiusage import /path/to/*.csv\n' +
+        '  API:  aiusage import --key sk-ant-admin... --start DATE --end DATE\n' +
+        '        aiusage config set anthropic-admin-key sk-ant-admin...\n' +
+        '  Download CSVs at: https://platform.claude.com/usage?date=YYYY-MM\n' +
+        '  Get Admin key at: console.anthropic.com → Settings → Admin Keys',
+      );
+    }
+
+    const startDate = resolveOptionalString(flags.start, undefined);
+    const endDate = resolveOptionalString(flags.end, undefined);
+    if (!startDate) throw new Error('--start DATE is required (e.g. --start 2025-11-01)');
+    if (!endDate) throw new Error('--end DATE is required (e.g. --end 2026-01-08)');
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      throw new Error('Dates must be in YYYY-MM-DD format');
+    }
+    if (startDate > endDate) throw new Error('--start must be before --end');
+
+    console.log(`Fetching Anthropic API usage: ${startDate} → ${endDate}`);
+
+    const dateRange = buildDateRange(startDate, endDate);
+    const apiResults = await scanAnthropicApiDates(dateRange, adminKey);
+
+    allDays = dateRange
+      .map(date => ({ usageDate: date, breakdowns: apiResults.get(date) ?? [] }))
+      .filter(d => d.breakdowns.length > 0);
+
+    if (allDays.length === 0) {
+      console.log('No usage data returned from Anthropic API for the specified range.');
+      return;
+    }
+    console.log(`Found data for ${allDays.length} days. Uploading...`);
+  }
+
+  for (const target of targets) {
+    if (!target.deviceToken) {
+      console.log(`Skipping "${target.name}": not enrolled (missing deviceToken)`);
+      continue;
+    }
+
+    const BATCH_SIZE = 30;
+    let totalProcessed = 0;
+
+    for (let i = 0; i < allDays.length; i += BATCH_SIZE) {
+      const batch = allDays.slice(i, i + BATCH_SIZE);
+      const response = await uploadDailyUsage(
+        target.apiBaseUrl,
+        { siteId: target.siteId, deviceId, deviceAlias: config.deviceAlias, deviceToken: target.deviceToken },
+        batch,
+      );
+      totalProcessed += response.daysProcessed;
+    }
+
+    console.log(`Uploaded ${totalProcessed} days to "${target.name}"`);
+  }
+}
+
 async function runInit(flags: Record<string, string | boolean>) {
   const config = await readConfig();
   const next: AIUsageConfig = {
@@ -397,6 +527,82 @@ async function runConfigSet(args: string[]) {
   console.log(JSON.stringify({ configPath: getConfigPath(), updated: keyPath }, null, 2));
 }
 
+async function runProjectList() {
+  const config = await readConfig();
+  const projects = await discoverProjects(config.projectAliases);
+
+  if (projects.length === 0) {
+    console.log('未发现任何项目。');
+    return;
+  }
+
+  // 计算列宽
+  const nameWidth = Math.max(6, ...projects.map(p => p.name.length));
+  const aliasWidth = Math.max(4, ...projects.map(p => (p.alias ?? '-').length));
+
+  console.log(
+    '项目'.padEnd(nameWidth + 2) +
+    '别名'.padEnd(aliasWidth + 2) +
+    '来源'
+  );
+  console.log('-'.repeat(nameWidth + aliasWidth + 20));
+
+  for (const p of projects) {
+    console.log(
+      p.name.padEnd(nameWidth + 2) +
+      (p.alias ?? '-').padEnd(aliasWidth + 2) +
+      p.sources.join(', ')
+    );
+  }
+
+  console.log(`\n共 ${projects.length} 个项目`);
+}
+
+async function runProjectAlias(args: string[]) {
+  if (args.length === 0) {
+    const config = await readConfig();
+    const aliases = config.projectAliases ?? {};
+    const entries = Object.entries(aliases);
+    if (entries.length === 0) {
+      console.log('尚未设置任何项目别名。');
+      console.log('用法: aiusage project alias <项目名> <别名>');
+      return;
+    }
+    for (const [from, to] of entries) {
+      console.log(`  ${from} → ${to}`);
+    }
+    return;
+  }
+
+  if (args[0] === '--remove') {
+    const name = args.slice(1).join(' ').trim();
+    if (!name) throw new Error('请指定要移除别名的项目名');
+    const config = await readConfig();
+    const aliases = { ...(config.projectAliases ?? {}) };
+    if (!(name in aliases)) {
+      throw new Error(`项目 "${name}" 未设置别名`);
+    }
+    delete aliases[name];
+    config.projectAliases = Object.keys(aliases).length > 0 ? aliases : undefined;
+    await writeConfig(config);
+    console.log(`已移除 "${name}" 的别名。`);
+    return;
+  }
+
+  if (args.length < 2) {
+    throw new Error('用法: aiusage project alias <项目名> <别名>');
+  }
+
+  const name = args[0];
+  const alias = args.slice(1).join(' ').trim();
+  if (!alias) throw new Error('别名不能为空');
+
+  const config = await readConfig();
+  config.projectAliases = { ...(config.projectAliases ?? {}), [name]: alias };
+  await writeConfig(config);
+  console.log(`已设置: ${name} → ${alias}`);
+}
+
 function printHelp() {
   const initialized = existsSync(getConfigPath());
   console.log(`aiusage v${getVersion()}\n`);
@@ -411,9 +617,26 @@ function printHelp() {
   console.log('  aiusage report [--range 7d|1m|3m|all] [--detail] [--lang en|zh] [--no-emoji] [--json]');
   console.log('  aiusage schedule [on|off|status] [--every 5m]');
   console.log('  aiusage doctor');
+  console.log('  aiusage project [list]');
+  console.log('  aiusage project alias [<项目名> <别名>] [--remove <项目名>]');
   console.log('  aiusage config set <key> <value...>');
   console.log('');
   console.log(`配置文件: ${getConfigPath()}${initialized ? '' : ' (尚未初始化)'}`);
+}
+
+function printUsageHint() {
+  console.log(`aiusage v${getVersion()}\n`);
+  console.log('常用命令:');
+  console.log('  scan [--date YYYY-MM-DD]           扫描某日用量明细');
+  console.log('  report [--range 7d|1m|3m|all]      本地用量报告');
+  console.log('  project [list]                     列出本机所有项目');
+  console.log('  project alias <名称> <别名>         设置项目别名');
+  console.log('  sync                               上传用量到服务端');
+  console.log('  schedule [on|off|status]            定时同步');
+  console.log('  doctor                             诊断检查');
+  console.log('  config set <key> <value>           修改配置');
+  console.log('');
+  console.log(`配置文件: ${getConfigPath()}`);
 }
 
 function parseArgs(args: string[]): { flags: Record<string, string | boolean>; positionals: string[] } {
