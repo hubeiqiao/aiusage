@@ -92,6 +92,16 @@ body {
   animation: fade-up 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
 }
 
+/* Hide scrollbar for horizontal filter tabs on mobile */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 5px;

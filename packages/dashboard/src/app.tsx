@@ -149,10 +149,10 @@ function FilterTabs({
   const activeClass = 'bg-white text-slate-900 shadow-sm dark:bg-[#222222] dark:text-slate-300';
   const inactiveClass = 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300';
   return (
-    <div className="inline-flex items-center rounded-lg bg-slate-100/80 p-0.5 dark:bg-[#1a1a1a]/80">
+    <div className="inline-flex items-center rounded-lg bg-slate-100/80 p-0.5 dark:bg-[#1a1a1a]/80 flex-nowrap">
       <button
         onClick={() => onChange('')}
-        className={`rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-all duration-150 ${
+        className={`shrink-0 rounded-md px-2.5 py-1.5 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
           !value ? activeClass : inactiveClass
         }`}
       >
@@ -162,7 +162,7 @@ function FilterTabs({
         <button
           key={o.value}
           onClick={() => onChange(o.value === value ? '' : o.value)}
-          className={`rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-all duration-150 ${
+          className={`shrink-0 rounded-md px-2.5 py-1.5 text-[12px] font-medium whitespace-nowrap transition-all duration-150 ${
             value === o.value ? activeClass : inactiveClass
           }`}
         >
@@ -297,7 +297,7 @@ export function App() {
           {overview && fOpts.products.length > 1 && (
             <>
               <div className="hidden h-5 w-px bg-slate-200 dark:bg-[#222222] sm:block" />
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
                 <FilterTabs
                   value={filters.product}
                   options={fOpts.products}
@@ -310,7 +310,7 @@ export function App() {
           {overview && fOpts.devices.length >= 1 && (
             <>
               <div className="hidden h-5 w-px bg-slate-200 dark:bg-[#222222] sm:block" />
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
                 <FilterTabs
                   value={filters.deviceId}
                   options={fOpts.devices}
