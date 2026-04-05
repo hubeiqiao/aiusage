@@ -94,7 +94,8 @@ try {
     console.log('  pnpm setup\n');
     console.log('See: https://github.com/ennann/aiusage#deploy-your-own-server');
   } else if (command === '--help' || command === '-h' || command === 'help') {
-    printHelp();
+    const zh = (await readConfig()).lang === 'zh';
+    printHelp(zh);
   } else {
     const config = await readConfig();
     const lang = config.lang || 'en';
@@ -588,54 +589,80 @@ async function runProjectAlias(args: string[]) {
   console.log(zh ? `已设置: ${name} → ${alias}` : `Set: ${name} → ${alias}`);
 }
 
-function printHelp() {
-  const initialized = existsSync(getConfigPath());
+function printHelp(zh = false) {
   console.log(`aiusage v${getVersion()}\n`);
-  console.log('Usage: aiusage <command>');
+  const cmds = zh ? [
+    ['scan [--date YYYY-MM-DD] [--json]',                    '扫描某日用量明细'],
+    ['report [--range 7d|1m|3m|all] [--detail] [--json]',    '本地用量报告'],
+    ['sync [--today] [--lookback N] [--date YYYY-MM-DD]',    '上传用量到服务端'],
+    ['sync --from YYYY-MM-DD [--to YYYY-MM-DD]',             '上传指定日期范围'],
+    ['project [list]',                                       '列出本机所有项目'],
+    ['project alias [<名称> <别名>]',                         '查看或设置项目别名'],
+    ['project alias --remove <名称>',                        '移除项目别名'],
+    ['schedule [on|off|status] [--every 5m]',                '定时同步管理'],
+    ['doctor',                                               '诊断检查'],
+    ['config set <key> <value>',                             '修改配置'],
+    ['init [--device-id ID] [--device-name NAME]',           '初始化本地配置'],
+    ['enroll --server URL --site-id ID --enroll-token TOKEN','注册设备到服务端'],
+    ['health [--server URL]',                                '测试服务端连通性'],
+  ] : [
+    ['scan [--date YYYY-MM-DD] [--json]',                    'Scan daily usage breakdown'],
+    ['report [--range 7d|1m|3m|all] [--detail] [--json]',    'Local usage report'],
+    ['sync [--today] [--lookback N] [--date YYYY-MM-DD]',    'Upload usage to server'],
+    ['sync --from YYYY-MM-DD [--to YYYY-MM-DD]',             'Upload specific date range'],
+    ['project [list]',                                       'List all projects'],
+    ['project alias [<name> <alias>]',                       'View or set project alias'],
+    ['project alias --remove <name>',                        'Remove project alias'],
+    ['schedule [on|off|status] [--every 5m]',                'Scheduled sync management'],
+    ['doctor',                                               'Run diagnostics'],
+    ['config set <key> <value>',                             'Update config'],
+    ['init [--device-id ID] [--device-name NAME]',           'Initialize local config'],
+    ['enroll --server URL --site-id ID --enroll-token TOKEN','Register device with server'],
+    ['health [--server URL]',                                'Test server connectivity'],
+  ];
+
+  const dw = (s: string) => [...s].reduce((w, c) => w + (c.charCodeAt(0) > 0x7f ? 2 : 1), 0);
+  const pad = (s: string, width: number) => s + ' '.repeat(Math.max(0, width - dw(s)));
+  const maxCmd = Math.max(...cmds.map(c => dw(c[0])));
+  console.log(zh ? '命令:' : 'Commands:');
+  for (const [cmd, desc] of cmds) {
+    console.log(`  ${pad(cmd, maxCmd + 2)} ${desc}`);
+  }
   console.log('');
-  console.log('Commands:');
-  console.log('  aiusage init [--device-id ID] [--device-name NAME] [--lookback N]');
-  console.log('  aiusage enroll --server URL --site-id ID --enroll-token TOKEN [--target NAME]');
-  console.log('  aiusage sync [--target NAME] [--date YYYY-MM-DD] [--from YYYY-MM-DD [--to YYYY-MM-DD]] [--lookback N] [--today]');
-  console.log('  aiusage health [--target NAME] [--server URL]');
-  console.log('  aiusage scan [--date YYYY-MM-DD] [--json]');
-  console.log('  aiusage report [--range 7d|1m|3m|all] [--detail] [--lang en|zh] [--no-emoji] [--json]');
-  console.log('  aiusage schedule [on|off|status] [--every 5m]');
-  console.log('  aiusage doctor');
-  console.log('  aiusage project [list]');
-  console.log('  aiusage project alias [<项目名> <别名>] [--remove <项目名>]');
-  console.log('  aiusage config set <key> <value...>');
-  console.log('');
-  console.log(`配置文件: ${getConfigPath()}${initialized ? '' : ' (尚未初始化)'}`);
+  console.log(`${zh ? '配置文件' : 'Config'}: ${getConfigPath()}`);
 }
 
 function printUsageHint(zh = false) {
   console.log(`aiusage v${getVersion()}\n`);
-  if (zh) {
-    console.log('常用命令:');
-    console.log('  scan [--date YYYY-MM-DD]           扫描某日用量明细');
-    console.log('  report [--range 7d|1m|3m|all]      本地用量报告');
-    console.log('  project [list]                     列出本机所有项目');
-    console.log('  project alias <名称> <别名>         设置项目别名');
-    console.log('  sync                               上传用量到服务端');
-    console.log('  schedule [on|off|status]            定时同步');
-    console.log('  doctor                             诊断检查');
-    console.log('  config set <key> <value>           修改配置');
-    console.log('');
-    console.log(`配置文件: ${getConfigPath()}`);
-  } else {
-    console.log('Commands:');
-    console.log('  scan [--date YYYY-MM-DD]           Scan daily usage breakdown');
-    console.log('  report [--range 7d|1m|3m|all]      Local usage report');
-    console.log('  project [list]                     List all projects');
-    console.log('  project alias <name> <alias>       Set project alias');
-    console.log('  sync                               Upload usage to server');
-    console.log('  schedule [on|off|status]            Scheduled sync');
-    console.log('  doctor                             Diagnostics');
-    console.log('  config set <key> <value>           Update config');
-    console.log('');
-    console.log(`Config: ${getConfigPath()}`);
+  const cmds = zh ? [
+    ['scan [--date YYYY-MM-DD]',              '扫描某日用量明细'],
+    ['report [--range 7d|1m|3m|all]',         '本地用量报告'],
+    ['sync [--today]',                        '上传用量到服务端'],
+    ['project [list]',                        '列出本机所有项目'],
+    ['project alias [<名称> <别名>]',          '查看或设置项目别名'],
+    ['schedule [on|off|status]',              '定时同步管理'],
+    ['doctor',                                '诊断检查'],
+    ['config set <key> <value>',              '修改配置'],
+  ] : [
+    ['scan [--date YYYY-MM-DD]',              'Scan daily usage breakdown'],
+    ['report [--range 7d|1m|3m|all]',         'Local usage report'],
+    ['sync [--today]',                        'Upload usage to server'],
+    ['project [list]',                        'List all projects'],
+    ['project alias [<name> <alias>]',        'View or set project alias'],
+    ['schedule [on|off|status]',              'Scheduled sync management'],
+    ['doctor',                                'Run diagnostics'],
+    ['config set <key> <value>',              'Update config'],
+  ];
+
+  const dw2 = (s: string) => [...s].reduce((w, c) => w + (c.charCodeAt(0) > 0x7f ? 2 : 1), 0);
+  const pad2 = (s: string, width: number) => s + ' '.repeat(Math.max(0, width - dw2(s)));
+  const maxCmd2 = Math.max(...cmds.map(c => dw2(c[0])));
+  console.log(zh ? '常用命令:' : 'Commands:');
+  for (const [cmd, desc] of cmds) {
+    console.log(`  ${pad2(cmd, maxCmd2 + 2)} ${desc}`);
   }
+  console.log('');
+  console.log(`${zh ? '配置文件' : 'Config'}: ${getConfigPath()}`);
 }
 
 function parseArgs(args: string[]): { flags: Record<string, string | boolean>; positionals: string[] } {
