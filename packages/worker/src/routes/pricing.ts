@@ -278,13 +278,38 @@ function renderPricingPage(siteTitle: string): string {
     .header-inner {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: center;
       height: 56px;
     }
     .header-left {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
+    }
+    .header-left a {
+      text-decoration: none;
+      color: inherit;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-radius: 8px;
+      padding: 4px 8px;
+      margin: -4px -8px;
+      transition: background 0.15s;
+    }
+    .header-left a:hover {
+      background: var(--card-border);
+    }
+    .site-logo {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+      border: 1px solid rgba(0,0,0,0.08);
+    }
+    html.dark .site-logo {
+      border-color: rgba(255,255,255,0.12);
     }
     .logo-icon {
       color: var(--text);
@@ -300,24 +325,14 @@ function renderPricingPage(siteTitle: string): string {
       font-weight: 400;
       margin-left: 4px;
     }
-    .header-right {
+
+    /* ── controls bar (below header) ── */
+    .controls-bar {
       display: flex;
+      justify-content: center;
       align-items: center;
       gap: 8px;
-    }
-    .header-left a {
-      text-decoration: none;
-      color: inherit;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      border-radius: 8px;
-      padding: 4px 8px;
-      margin: -4px -8px;
-      transition: background 0.15s;
-    }
-    .header-left a:hover {
-      background: var(--card-border);
+      padding: 12px 0;
     }
 
     /* ── theme toggle ── */
@@ -567,12 +582,6 @@ function renderPricingPage(siteTitle: string): string {
         align-items: flex-start;
         gap: 8px;
       }
-      .header-inner {
-        height: auto;
-        padding: 12px 0;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
     }
   </style>
 </head>
@@ -582,27 +591,33 @@ function renderPricingPage(siteTitle: string): string {
     <div class="container header-inner">
       <div class="header-left">
         <a href="/">
-          <svg class="logo-icon" viewBox="0 0 200 160" fill="none" width="32" height="26">
+          <img class="site-logo" id="site-logo" src="/logo-person.png" alt="" style="display:none"/>
+          <svg class="logo-icon" id="default-icon" viewBox="0 0 200 160" fill="none" width="28" height="22">
             <path d="M22 112 C30 112 38 90 44 82 C50 74 54 78 58 88 C62 98 64 116 70 120 C76 124 80 108 86 84 C92 60 96 22 104 16 C112 10 116 36 120 64 C124 92 126 138 134 140 C142 142 146 108 152 72 C158 36 162 14 168 16 C174 18 178 50 182 68" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <div class="logo-text">${escapeHtml(siteTitle)}<span>/ Model Pricing</span></div>
         </a>
       </div>
-      <div class="header-right">
-        <div class="theme-toggle">
-          <button class="theme-btn" data-theme="system" title="System">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          </button>
-          <button class="theme-btn" data-theme="light" title="Light">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-          </button>
-          <button class="theme-btn" data-theme="dark" title="Dark">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          </button>
-        </div>
-      </div>
     </div>
   </header>
+
+  <div class="container controls-bar">
+    <div class="theme-toggle" style="margin-right:4px">
+      <button class="theme-btn lang-btn" data-lang="zh">中</button>
+      <button class="theme-btn lang-btn" data-lang="en">En</button>
+    </div>
+    <div class="theme-toggle">
+      <button class="theme-btn" data-theme="system" title="System">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </button>
+      <button class="theme-btn" data-theme="light" title="Light">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      </button>
+      <button class="theme-btn" data-theme="dark" title="Dark">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </div>
 
   <main class="container">
     <!-- stats bar -->
@@ -682,6 +697,41 @@ function renderPricingPage(siteTitle: string): string {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
         if (getStored() === 'system') apply('system');
       });
+    })();
+
+    // ── i18n (sync lang toggle state with dashboard) ──
+    (function() {
+      var LANG_KEY = 'aiusage-locale';
+      function getStoredLang() {
+        try { return localStorage.getItem(LANG_KEY) || 'zh'; } catch(e) { return 'zh'; }
+      }
+      function applyLang(lang) {
+        document.querySelectorAll('.i18n').forEach(function(el) {
+          el.textContent = el.getAttribute('data-' + lang) || el.textContent;
+        });
+        document.querySelectorAll('.lang-btn').forEach(function(btn) {
+          btn.classList.toggle('active', btn.getAttribute('data-lang') === lang);
+        });
+        try { localStorage.setItem(LANG_KEY, lang); } catch(e) {}
+      }
+      applyLang(getStoredLang());
+      document.querySelectorAll('.lang-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          applyLang(btn.getAttribute('data-lang'));
+        });
+      });
+    })();
+
+    // ── logo detection ──
+    (function() {
+      var img = new Image();
+      img.onload = function() {
+        var logo = document.getElementById('site-logo');
+        var icon = document.getElementById('default-icon');
+        if (logo) logo.style.display = '';
+        if (icon) icon.style.display = 'none';
+      };
+      img.src = '/logo-person.png';
     })();
 
     // ── collapsible providers ──
