@@ -104,7 +104,7 @@ export function shellCss(): string {
       justify-content: center;
       align-items: center;
       gap: 8px;
-      padding: 12px 0;
+      padding: 16px 0;
     }
 
     /* ── toggle buttons ── */
