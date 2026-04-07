@@ -23,6 +23,7 @@ import { DonutSection } from './components/donut-section';
 import { ActivityHeatmap } from './components/activity-heatmap';
 import { buildActivityHeatmapData } from './utils/activity-heatmap-data';
 import { HeaderLogo, FooterLogo, useFaviconFromLogo } from './components/site-logo';
+import { SITE_TITLE } from './site-config';
 
 // ────────────────────────────────────────
 // Constants
@@ -297,12 +298,10 @@ export function App() {
     try { localStorage.setItem('aiusage-locale', l); } catch {}
   }, []);
   const t: T = I18N[locale];
-  const siteTitle = health?.siteTitle || 'AI Usage';
-
-  // Sync document title with siteTitle
+  // Sync document title
   useEffect(() => {
-    document.title = siteTitle;
-  }, [siteTitle]);
+    document.title = SITE_TITLE;
+  }, []);
 
   // Token legend (locale-aware)
   const tokenLegendLabels: Record<string, keyof T> = {
@@ -334,7 +333,7 @@ export function App() {
         <div className="flex flex-wrap items-center justify-between gap-y-2">
           <h1 className="flex items-center gap-2 text-[18px] sm:text-[22px] font-semibold tracking-tight text-slate-900 dark:text-slate-300">
             <HeaderLogo />
-            {siteTitle}
+            {SITE_TITLE}
           </h1>
           <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
             <ThemeToggle value={theme} onChange={setTheme} locale={locale} />
@@ -630,7 +629,7 @@ export function App() {
           <div className="flex items-center gap-3 text-[12px] text-slate-400 dark:text-slate-500">
             <span className="flex items-center gap-1.5 font-medium text-slate-500 dark:text-slate-400">
               <FooterLogo />
-              {siteTitle}
+              {SITE_TITLE}
             </span>
             {health?.version && (
               <span className="rounded-full bg-slate-100 dark:bg-[#1a1a1a] px-2 py-0.5 text-[10px] font-medium text-slate-400 dark:text-slate-500">

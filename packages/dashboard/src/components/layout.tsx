@@ -6,6 +6,7 @@ import type { ThemeMode } from '../theme';
 import { getStoredTheme, applyTheme } from '../theme';
 import type { HealthPayload } from '../hooks/use-overview';
 import { HeaderLogo, FooterLogo, useFaviconFromLogo } from './site-logo';
+import { SITE_TITLE } from '../site-config';
 
 // ────────────────────────────────────────
 // Context
@@ -14,7 +15,6 @@ import { HeaderLogo, FooterLogo, useFaviconFromLogo } from './site-logo';
 interface LayoutContextValue {
   locale: Locale;
   t: T;
-  siteTitle: string;
   isDark: boolean;
   refresh: () => void;
   loading: boolean;
@@ -149,16 +149,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const t: T = I18N[locale];
 
   useFaviconFromLogo();
-  const siteTitle = health?.siteTitle || 'AI Usage';
   const isDark = document.documentElement.classList.contains('dark');
 
-  // Sync document title with siteTitle
+  // Sync document title
   useEffect(() => {
-    document.title = siteTitle;
-  }, [siteTitle]);
+    document.title = SITE_TITLE;
+  }, []);
 
   const ctxValue: LayoutContextValue = {
-    locale, t, siteTitle, isDark, refresh, loading,
+    locale, t, isDark, refresh, loading,
   };
 
   return (
@@ -170,7 +169,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex flex-wrap items-center justify-between gap-y-2">
             <h1 className="flex items-center gap-2 text-[18px] sm:text-[22px] font-semibold tracking-tight text-slate-900 dark:text-slate-300">
               <HeaderLogo />
-              {siteTitle}
+              {SITE_TITLE}
             </h1>
             <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
               <ThemeToggle value={theme} onChange={setTheme} locale={locale} />
@@ -194,7 +193,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-3 text-[12px] text-slate-400 dark:text-slate-500">
               <span className="flex items-center gap-1.5 font-medium text-slate-500 dark:text-slate-400">
                 <FooterLogo />
-                {siteTitle}
+                {SITE_TITLE}
               </span>
               {health?.version && (
                 <span className="rounded-full bg-slate-100 dark:bg-[#1a1a1a] px-2 py-0.5 text-[10px] font-medium text-slate-400 dark:text-slate-500">

@@ -8,6 +8,5 @@ export function handleHealth(env: Env): Response {
     service: SERVICE_NAME,
     schemaVersion: SCHEMA_VERSION,
     time: new Date().toISOString(),
-    siteTitle: env.SITE_TITLE || '',
   });
 }
