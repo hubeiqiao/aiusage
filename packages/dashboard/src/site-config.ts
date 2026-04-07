@@ -4,4 +4,4 @@
  */
 
 /** Displayed in header, footer, and browser tab title. */
-export const SITE_TITLE = "Yizhe's Token Usage";
+export const SITE_TITLE = "Token Usage";
