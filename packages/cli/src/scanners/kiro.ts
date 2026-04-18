@@ -58,7 +58,25 @@ interface KiroChatRecord extends KiroSelectedModelRecord {
   chat?: unknown[];
 }
 
+interface KiroTokenRecord {
+  model?: unknown;
+  provider?: unknown;
+  promptTokens?: unknown;
+  generatedTokens?: unknown;
+  tokens_prompt?: unknown;
+  tokens_generated?: unknown;
+  timestamp?: unknown;
+}
+
 type KiroRecord = KiroChatRecord | KiroSessionRecord;
+
+type KiroTokenUsageMap = Map<string, Map<string, number>>;
+
+const KIRO_TOKEN_SOURCE = 'tokens_generated.jsonl';
+const KIRO_TOKEN_MODEL_ALIASES: Record<string, string> = {
+  qdev: 'claude-opus-4-6',
+  agent: 'claude-opus-4-6',
+};
 
 export async function scanKiroDates(
   targetDates: string[],
@@ -67,6 +85,7 @@ export async function scanKiroDates(
 ): Promise<Map<string, IngestBreakdown[]>> {
   const targetDateSet = new Set(targetDates);
   const dirs = resolveKiroDirs(baseDir);
+  const tokenUsage = await readKiroTokenUsage(dirs, targetDateSet);
 
   const files = (
     await Promise.all(
@@ -127,6 +146,7 @@ export async function scanKiroDates(
     );
   }
 
+  applyKiroTokenUsage(groupedByDate, tokenUsage);
   return finalize(groupedByDate);
 }
 
@@ -185,14 +205,96 @@ function getModelNameFromMetadata(metadata?: KiroMetadata): string {
 
 function normalizeModelName(model: string): string {
   if (!model) return 'unknown';
-  const lower = model.toLowerCase().replace(/_/g, '-');
-  if (!lower.startsWith('claude-')) return model;
+  const normalized = model.toLowerCase().replace(/_/g, '-');
+  const aliased = KIRO_TOKEN_MODEL_ALIASES[normalized] ?? normalized;
+  if (!aliased.startsWith('claude-')) return aliased;
 
-  let normalized = lower;
-  normalized = normalized.replace(/\./g, '-');
-  normalized = normalized.replace(/-v\d+(?:-\d+)*$/, '');
-  normalized = normalized.replace(/-\d{8}$/, '');
-  return normalized;
+  let mapped = aliased.replace(/\./g, '-');
+  mapped = mapped.replace(/-v\d+(?:-\d+)*$/, '');
+  mapped = mapped.replace(/-\d{8}$/, '');
+  return mapped;
+}
+
+function applyKiroTokenUsage(groupedByDate: ReturnType<typeof initDateMap>, tokenUsage: KiroTokenUsageMap): void {
+  for (const [date, byModel] of tokenUsage) {
+    const dayMap = groupedByDate.get(date);
+    if (!dayMap) continue;
+
+    for (const [model, promptTokens] of byModel) {
+      const key = `${model}|unknown`;
+      const breakdown = dayMap.get(key);
+      if (!breakdown) continue;
+      breakdown.inputTokens += promptTokens;
+    }
+  }
+}
+
+async function readKiroTokenUsage(dirs: string[], targetDateSet: Set<string>): Promise<KiroTokenUsageMap> {
+  const usage: KiroTokenUsageMap = new Map();
+  await Promise.all(
+    dirs.map(async (dir) => {
+      const tokenPath = join(dir, 'dev_data', KIRO_TOKEN_SOURCE);
+      try {
+        const mtime = await readFileMtime(tokenPath);
+        const content = await readFile(tokenPath, 'utf-8');
+        await ingestKiroTokenLog(content, mtime, usage, targetDateSet);
+      } catch {
+        return;
+      }
+    }),
+  );
+  return usage;
+}
+
+async function ingestKiroTokenLog(
+  content: string,
+  mtime: Date | null,
+  usage: KiroTokenUsageMap,
+  targetDateSet: Set<string>,
+): Promise<void> {
+  const fallbackDate = mtime ? dateKey(mtime) : null;
+  const fallback = fallbackDate;
+
+  for (const line of content.split('\n')) {
+    const rawLine = line.trim();
+    if (!rawLine) continue;
+
+    let record: KiroTokenRecord;
+    try {
+      record = JSON.parse(rawLine);
+    } catch {
+      continue;
+    }
+
+    if (typeof record.provider === 'string' && record.provider.toLowerCase() !== 'kiro') continue;
+    const rawModel = typeof record.model === 'string' ? record.model : record.model == null ? '' : String(record.model);
+    if (!rawModel.trim()) continue;
+    const model = normalizeModelName(rawModel);
+    if (model === 'unknown') continue;
+    const promptTokens = parseTokenCount(record.promptTokens ?? record.tokens_prompt);
+    if (promptTokens <= 0) continue;
+
+    const ts = parseTs(
+      (record as { timestamp?: string | number }).timestamp
+      ?? (record as { createdAt?: string | number }).createdAt
+      ?? (record as { created_at?: string | number }).created_at
+    );
+    const usageDate = ts ? dateKey(ts) : fallback;
+    if (!usageDate || !targetDateSet.has(usageDate)) continue;
+
+    const bucket = usage.get(usageDate) ?? new Map<string, number>();
+    bucket.set(model, (bucket.get(model) ?? 0) + promptTokens);
+    usage.set(usageDate, bucket);
+  }
+}
+
+function parseTokenCount(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+  }
+  return 0;
 }
 
 function resolveExecutionKey(data: KiroChatRecord | KiroSessionRecord, filePath: string): string {

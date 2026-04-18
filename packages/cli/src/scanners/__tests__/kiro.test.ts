@@ -23,6 +23,11 @@ function writeKiroSessionJson(filePath: string, data: object): Promise<void> {
   return writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
+function writeKiroTokenLog(filePath: string, records: Array<Record<string, unknown>>): Promise<void> {
+  const content = records.map((record) => JSON.stringify(record)).join('\n');
+  return writeFile(filePath, `${content}\n`, 'utf-8');
+}
+
 describe('scanKiroDates', () => {
   it('extracts a valid chat file as one event with correct date bucket', async () => {
     const day = '2026-01-15';
@@ -244,5 +249,93 @@ describe('scanKiroDates', () => {
     const breakdown = result.get(day) ?? [];
     expect(breakdown).toHaveLength(1);
     expect(breakdown[0].model).toBe('claude-sonnet-4');
+  });
+
+  it('adds prompt-only token estimates from kiro dev_data/tokens_generated.jsonl', async () => {
+    const day = '2026-01-24';
+    await mkdir(join(tmpDir, 'dev_data'), { recursive: true });
+    await writeKiroTokenLog(
+      join(tmpDir, 'dev_data', 'tokens_generated.jsonl'),
+      [
+        {
+          model: 'agent',
+          provider: 'kiro',
+          promptTokens: 1200,
+          generatedTokens: 500,
+          timestamp: `${day}T09:00:00.000Z`,
+        },
+        {
+          model: 'agent',
+          provider: 'kiro',
+          promptTokens: 300,
+          generatedTokens: 0,
+          timestamp: `${day}T10:00:00.000Z`,
+        },
+      ],
+    );
+    await writeKiroChat(
+      join(tmpDir, 'chat-01.chat'),
+      {
+        metadata: {
+          startTime: `${day}T11:00:00.000Z`,
+          modelProvider: 'qdev',
+          executionId: 'kiro-opex-1',
+        },
+      },
+    );
+    await writeKiroChat(
+      join(tmpDir, 'chat-02.chat'),
+      {
+        metadata: {
+          startTime: `${day}T12:00:00.000Z`,
+          modelProvider: 'qdev',
+          executionId: 'kiro-opex-2',
+        },
+      },
+    );
+
+    const result = await scanKiroDates([day], tmpDir);
+    const breakdown = result.get(day) ?? [];
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0]).toEqual(
+      expect.objectContaining({
+        provider: 'kiro',
+        product: 'kiro',
+        model: 'claude-opus-4-6',
+        channel: 'cli',
+        eventCount: 2,
+        inputTokens: 1500,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningOutputTokens: 0,
+      }),
+    );
+  });
+
+  it('skips malformed tokens_generated.jsonl while still returning event counts', async () => {
+    const day = '2026-01-25';
+    await mkdir(join(tmpDir, 'dev_data'), { recursive: true });
+    await writeFile(
+      join(tmpDir, 'dev_data', 'tokens_generated.jsonl'),
+      '{not valid json}\n',
+      'utf-8',
+    );
+    await writeKiroChat(
+      join(tmpDir, 'chat.chat'),
+      {
+        metadata: {
+          startTime: `${day}T14:00:00.000Z`,
+          modelId: 'gpt-4.1',
+          executionId: 'kiro-malformed-token-file',
+        },
+      },
+    );
+
+    const result = await scanKiroDates([day], tmpDir);
+    const breakdown = result.get(day) ?? [];
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0].eventCount).toBe(1);
+    expect(breakdown[0].inputTokens).toBe(0);
   });
 });
