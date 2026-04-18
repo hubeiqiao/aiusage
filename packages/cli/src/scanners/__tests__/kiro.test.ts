@@ -28,6 +28,41 @@ function writeKiroTokenLog(filePath: string, records: Array<Record<string, unkno
   return writeFile(filePath, `${content}\n`, 'utf-8');
 }
 
+function createSqliteDb(filePath: string): any {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sqliteModule = require('node:sqlite') as typeof import('node:sqlite');
+  return new sqliteModule.DatabaseSync(filePath, { open: true });
+}
+
+async function writeKiroTokenSqlite(filePath: string, rows: Array<{
+  model: string;
+  provider: string;
+  promptTokens: number;
+  generatedTokens: number;
+  timestamp: string;
+}>): Promise<void> {
+  let db: ReturnType<typeof createSqliteDb> | null = null;
+  try {
+    db = createSqliteDb(filePath);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tokens_generated (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        model TEXT,
+        provider TEXT,
+        tokens_generated INT,
+        tokens_prompt INT,
+        timestamp DATETIME
+      )
+    `);
+    const stmt = db.prepare('INSERT INTO tokens_generated(model, provider, tokens_generated, tokens_prompt, timestamp) VALUES(?, ?, ?, ?, ?)');
+    for (const row of rows) {
+      stmt.run(row.model, row.provider, row.generatedTokens, row.promptTokens, row.timestamp);
+    }
+  } finally {
+    if (db) db.close();
+  }
+}
+
 describe('scanKiroDates', () => {
   it('extracts a valid chat file as one event with correct date bucket', async () => {
     const day = '2026-01-15';
@@ -305,7 +340,7 @@ describe('scanKiroDates', () => {
         channel: 'cli',
         eventCount: 2,
         inputTokens: 1500,
-        outputTokens: 0,
+        outputTokens: 500,
         cachedInputTokens: 0,
         cacheWriteTokens: 0,
         reasoningOutputTokens: 0,
@@ -337,5 +372,64 @@ describe('scanKiroDates', () => {
     expect(breakdown).toHaveLength(1);
     expect(breakdown[0].eventCount).toBe(1);
     expect(breakdown[0].inputTokens).toBe(0);
+  });
+
+  it('reads token estimates from kiro dev_data/devdata.sqlite', async () => {
+    const day = '2026-01-26';
+    await mkdir(join(tmpDir, 'dev_data'), { recursive: true });
+    const sqlitePath = join(tmpDir, 'dev_data', 'devdata.sqlite');
+
+    try {
+      await writeKiroTokenSqlite(
+        sqlitePath,
+        [
+          {
+            model: 'agent',
+            provider: 'kiro',
+            promptTokens: 1200,
+            generatedTokens: 300,
+            timestamp: `${day}T09:00:00.000Z`,
+          },
+          {
+            model: 'agent',
+            provider: 'kiro',
+            promptTokens: 300,
+            generatedTokens: 100,
+            timestamp: `${day}T11:00:00.000Z`,
+          },
+        ],
+      );
+    } catch {
+      return;
+    }
+
+    await writeKiroChat(
+      join(tmpDir, 'chat-01.chat'),
+      {
+        metadata: {
+          startTime: `${day}T10:00:00.000Z`,
+          modelProvider: 'qdev',
+          executionId: 'sqlite-kiro-1',
+        },
+      },
+    );
+
+    const result = await scanKiroDates([day], tmpDir);
+    const breakdown = result.get(day) ?? [];
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0]).toEqual(
+      expect.objectContaining({
+        provider: 'kiro',
+        product: 'kiro',
+        model: 'claude-opus-4-6',
+        channel: 'cli',
+        eventCount: 1,
+        inputTokens: 1500,
+        outputTokens: 400,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningOutputTokens: 0,
+      }),
+    );
   });
 });

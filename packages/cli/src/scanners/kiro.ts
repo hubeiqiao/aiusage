@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { copyFile, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { IngestBreakdown } from '@aiusage/shared';
 import {
@@ -68,11 +69,25 @@ interface KiroTokenRecord {
   timestamp?: unknown;
 }
 
+interface KiroSqliteTokenRow {
+  model?: unknown;
+  provider?: unknown;
+  tokens_prompt?: unknown;
+  tokens_generated?: unknown;
+  timestamp?: unknown;
+}
+
 type KiroRecord = KiroChatRecord | KiroSessionRecord;
 
-type KiroTokenUsageMap = Map<string, Map<string, number>>;
+interface KiroTokenTotals {
+  input: number;
+  output: number;
+}
+
+type KiroTokenUsageMap = Map<string, Map<string, KiroTokenTotals>>;
 
 const KIRO_TOKEN_SOURCE = 'tokens_generated.jsonl';
+const KIRO_SQLITE_SOURCE = 'devdata.sqlite';
 const KIRO_TOKEN_MODEL_ALIASES: Record<string, string> = {
   qdev: 'claude-opus-4-6',
   agent: 'claude-opus-4-6',
@@ -220,11 +235,12 @@ function applyKiroTokenUsage(groupedByDate: ReturnType<typeof initDateMap>, toke
     const dayMap = groupedByDate.get(date);
     if (!dayMap) continue;
 
-    for (const [model, promptTokens] of byModel) {
+    for (const [model, usage] of byModel) {
       const key = `${model}|unknown`;
       const breakdown = dayMap.get(key);
       if (!breakdown) continue;
-      breakdown.inputTokens += promptTokens;
+      breakdown.inputTokens += usage.input;
+      breakdown.outputTokens += usage.output;
     }
   }
 }
@@ -239,7 +255,14 @@ async function readKiroTokenUsage(dirs: string[], targetDateSet: Set<string>): P
         const content = await readFile(tokenPath, 'utf-8');
         await ingestKiroTokenLog(content, mtime, usage, targetDateSet);
       } catch {
-        return;
+        // no-op
+      }
+
+      const sqlitePath = join(dir, 'dev_data', KIRO_SQLITE_SOURCE);
+      try {
+        await ingestKiroTokenSqlite(sqlitePath, usage, targetDateSet);
+      } catch {
+        // no-op
       }
     }),
   );
@@ -272,7 +295,8 @@ async function ingestKiroTokenLog(
     const model = normalizeModelName(rawModel);
     if (model === 'unknown') continue;
     const promptTokens = parseTokenCount(record.promptTokens ?? record.tokens_prompt);
-    if (promptTokens <= 0) continue;
+    const outputTokens = parseTokenCount(record.generatedTokens ?? record.tokens_generated);
+    if (promptTokens <= 0 && outputTokens <= 0) continue;
 
     const ts = parseTs(
       (record as { timestamp?: string | number }).timestamp
@@ -282,9 +306,103 @@ async function ingestKiroTokenLog(
     const usageDate = ts ? dateKey(ts) : fallback;
     if (!usageDate || !targetDateSet.has(usageDate)) continue;
 
-    const bucket = usage.get(usageDate) ?? new Map<string, number>();
-    bucket.set(model, (bucket.get(model) ?? 0) + promptTokens);
+    const bucket = usage.get(usageDate) ?? new Map<string, KiroTokenTotals>();
+    const existing = bucket.get(model) as KiroTokenTotals | undefined;
+    if (existing) {
+      existing.input += promptTokens;
+      existing.output += outputTokens;
+    } else {
+      bucket.set(model, { input: promptTokens, output: outputTokens });
+    }
     usage.set(usageDate, bucket);
+  }
+}
+
+async function ingestKiroTokenSqlite(
+  sqlitePath: string,
+  usage: KiroTokenUsageMap,
+  targetDateSet: Set<string>,
+): Promise<void> {
+  const mtime = await readFileMtime(sqlitePath);
+  const rows = await readKiroTokenRows(sqlitePath);
+  const fallbackDate = mtime ? dateKey(mtime) : null;
+
+  for (const row of rows) {
+    const rawModel = typeof row.model === 'string'
+      ? row.model
+      : row.model == null
+        ? ''
+        : String(row.model);
+    if (!rawModel.trim()) continue;
+    const model = normalizeModelName(rawModel);
+    if (model === 'unknown') continue;
+
+    const provider = typeof row.provider === 'string' ? row.provider.toLowerCase() : '';
+    if (provider && provider !== 'kiro') continue;
+
+    const inputTokens = parseTokenCount(row.tokens_prompt);
+    const outputTokens = parseTokenCount(row.tokens_generated);
+    if (inputTokens <= 0 && outputTokens <= 0) continue;
+
+    const ts = parseTs(row.timestamp as string | number);
+    const usageDate = ts ? dateKey(ts) : fallbackDate;
+    if (!usageDate || !targetDateSet.has(usageDate)) continue;
+
+    const bucket = usage.get(usageDate) ?? new Map<string, KiroTokenTotals>();
+    const existing = bucket.get(model);
+    if (existing) {
+      existing.input += inputTokens;
+      existing.output += outputTokens;
+    } else {
+      bucket.set(model, { input: inputTokens, output: outputTokens });
+    }
+    usage.set(usageDate, bucket);
+  }
+}
+
+async function readKiroTokenRows(dbPath: string): Promise<KiroSqliteTokenRow[]> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+    const direct = readKiroTokenRowsFromDb(dbPath, DatabaseSync);
+    return direct;
+  } catch (error) {
+    if (error instanceof Error && /database is locked/i.test(error.message)) {
+      return withKiroDbSnapshot(dbPath, (snapshotPath) => readKiroTokenRowsFromDb(snapshotPath));
+    }
+    throw error;
+  }
+}
+
+async function withKiroDbSnapshot<T>(dbPath: string, cb: (snapshotPath: string) => T): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), 'aiusage-kiro-'));
+  const snapshotPath = join(dir, KIRO_SQLITE_SOURCE);
+  await copyFile(dbPath, snapshotPath);
+  for (const suffix of ['-shm', '-wal']) {
+    if (existsSync(`${dbPath}${suffix}`)) {
+      await copyFile(`${dbPath}${suffix}`, `${snapshotPath}${suffix}`);
+    }
+  }
+
+  try {
+    return cb(snapshotPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+function readKiroTokenRowsFromDb(dbPath: string, dbApi?: typeof import('node:sqlite').DatabaseSync): KiroSqliteTokenRow[] {
+  if (!dbApi) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ({ DatabaseSync: dbApi } = require('node:sqlite') as typeof import('node:sqlite'));
+  }
+
+  const db = new dbApi(dbPath, { open: true });
+  try {
+    const stmt = db.prepare('SELECT model, provider, tokens_prompt, tokens_generated, timestamp FROM tokens_generated');
+    return (stmt.all() as unknown[]) as KiroSqliteTokenRow[];
+  } finally {
+    db.close();
   }
 }
 
