@@ -179,10 +179,53 @@ describe('scanKiroDates', () => {
       expect.objectContaining({
         provider: 'kiro',
         product: 'kiro',
-        model: 'claude-opus-4.6',
+        model: 'claude-opus-4-6',
         channel: 'cli',
         eventCount: 1,
       }),
     );
+  });
+
+  it('normalizes Kiro Claude model names with dots to price-compatible dashes', async () => {
+    const day = '2026-01-21';
+    await writeKiroChat(
+      join(tmpDir, 'opus-dot.chat'),
+      {
+        metadata: {
+          startTime: `${day}T07:45:00.000Z`,
+          modelId: 'claude-opus-4.6',
+          executionId: 'opus-2026-01-21',
+        },
+      },
+    );
+
+    const result = await scanKiroDates([day], tmpDir);
+    const breakdown = result.get(day) ?? [];
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0].model).toBe('claude-opus-4-6');
+  });
+
+  it('normalizes Kiro uppercase underscore Claude model metadata to canonical format', async () => {
+    const day = '2026-01-22';
+    await writeKiroSessionJson(
+      join(tmpDir, 'sonnet-legacy.json'),
+      {
+        session_id: 'kiro-legacy',
+        created_at: `${day}T06:00:00.000Z`,
+        updated_at: `${day}T06:15:00.000Z`,
+        session_state: {
+          rts_model_state: {
+            model_info: {
+              model_id: 'CLAUDE_SONNET_4_20250514_V1_0',
+            },
+          },
+        },
+      },
+    );
+
+    const result = await scanKiroDates([day], tmpDir);
+    const breakdown = result.get(day) ?? [];
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0].model).toBe('claude-sonnet-4');
   });
 });

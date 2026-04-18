@@ -607,9 +607,14 @@ function resolveModelPricing(
   const models = catalog.providers[provider]?.[product]?.models;
   if (!models) return null;
 
-  const aliasResolved = catalog.aliases[model];
+  const normalizedModel = normalizeModelForPricing(model);
+  const aliasResolved = catalog.aliases[normalizedModel] ?? catalog.aliases[model];
   if (aliasResolved && models[aliasResolved]) {
     return { resolvedModel: aliasResolved, pricing: models[aliasResolved] };
+  }
+
+  if (models[normalizedModel]) {
+    return { resolvedModel: normalizedModel, pricing: models[normalizedModel] };
   }
 
   if (models[model]) {
@@ -617,12 +622,25 @@ function resolveModelPricing(
   }
 
   for (const knownModel of Object.keys(models).sort((a, b) => b.length - a.length)) {
+    if (normalizedModel.startsWith(`${knownModel}-`)) {
+      return { resolvedModel: knownModel, pricing: models[knownModel] };
+    }
     if (model.startsWith(`${knownModel}-`)) {
       return { resolvedModel: knownModel, pricing: models[knownModel] };
     }
   }
 
   return null;
+}
+
+function normalizeModelForPricing(model: string): string {
+  let normalized = model.trim().toLowerCase().replace(/_/g, '-');
+  if (!normalized.startsWith('claude-')) return normalized;
+
+  normalized = normalized.replace(/\./g, '-');
+  normalized = normalized.replace(/-v\d+(?:-\d+)*$/, '');
+  normalized = normalized.replace(/-\d{8}$/, '');
+  return normalized;
 }
 
 interface CostResult {

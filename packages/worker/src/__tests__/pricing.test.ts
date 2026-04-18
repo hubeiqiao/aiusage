@@ -130,6 +130,40 @@ describe('calculateCost: 模型别名解析', () => {
     // 别名解析后 resolvedModel !== baseModel，status 为 estimated
     expect(aliased.costStatus).toBe('estimated');
   });
+
+  it('claude-opus-4.6 解析为 claude-opus-4-6', () => {
+    const dotted = calculateCost('anthropic', 'claude-code', 'claude-opus-4.6', {
+      inputTokens: 500_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 200_000,
+    });
+    const dashed = calculateCost('anthropic', 'claude-code', 'claude-opus-4-6', {
+      inputTokens: 500_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 200_000,
+    });
+    expect(dotted.estimatedCostUsd).toBe(dashed.estimatedCostUsd);
+    expect(dotted.costStatus).toBe('estimated');
+  });
+
+  it('CLAUDE_SONNET_4_20250514_V1_0 解析为 claude-sonnet-4', () => {
+    const legacy = calculateCost('anthropic', 'claude-code', 'CLAUDE_SONNET_4_20250514_V1_0', {
+      inputTokens: 500_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 200_000,
+    });
+    const direct = calculateCost('anthropic', 'claude-code', 'claude-sonnet-4', {
+      inputTokens: 500_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 200_000,
+    });
+    expect(legacy.estimatedCostUsd).toBe(direct.estimatedCostUsd);
+    expect(legacy.costStatus).toBe('estimated');
+  });
 });
 
 // ─── calculateCost: 模型前缀匹配 ───

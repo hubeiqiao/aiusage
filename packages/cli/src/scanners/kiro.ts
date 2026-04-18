@@ -156,28 +156,50 @@ function resolveKiroDirs(baseDir?: string): string[] {
 }
 
 function getModelNameFromData(data: KiroChatRecord | KiroSessionRecord): string {
-  const modelId = (
-    data.session_state?.rts_model_state?.model_info?.model_id
-    ?? data.session_state?.rts_model_state?.model_info?.model_name
-  )?.trim();
+  let modelId: string | undefined;
+  if ('session_state' in data) {
+    modelId = (
+      data.session_state?.rts_model_state?.model_info?.model_id
+      ?? data.session_state?.rts_model_state?.model_info?.model_name
+    )?.trim();
+  }
+
   if (modelId) return modelId;
   return getModelNameFromMetadata(data.metadata);
 }
 
 function getModelName(data: KiroRecord): string {
-  return getModelNameFromData(data);
+  return normalizeModelName(getModelNameFromData(data));
 }
 
 function getModelNameFromMetadata(metadata?: KiroMetadata): string {
-  return metadata?.modelId?.trim() || metadata?.modelProvider?.trim() || 'unknown';
+  return normalizeModelName(
+    metadata?.modelId?.trim() || metadata?.modelProvider?.trim() || 'unknown',
+  );
+}
+
+function normalizeModelName(model: string): string {
+  if (!model) return 'unknown';
+  const lower = model.toLowerCase().replace(/_/g, '-');
+  if (!lower.startsWith('claude-')) return model;
+
+  let normalized = lower;
+  normalized = normalized.replace(/\./g, '-');
+  normalized = normalized.replace(/-v\d+(?:-\d+)*$/, '');
+  normalized = normalized.replace(/-\d{8}$/, '');
+  return normalized;
 }
 
 function resolveExecutionKey(data: KiroChatRecord | KiroSessionRecord, filePath: string): string {
-  const candidate = data.executionId ?? data.actionId;
+  const candidate = 'executionId' in data ? data.executionId : undefined;
   const chatKey = typeof candidate === 'string' ? candidate.trim() : '';
   if (chatKey) return chatKey;
-  const sessionKey = typeof data.session_id === 'string' ? data.session_id.trim() : '';
-  if (sessionKey) return sessionKey;
+  const actionCandidate = 'actionId' in data ? data.actionId : undefined;
+  const actionKey = typeof actionCandidate === 'string' ? actionCandidate.trim() : '';
+  if (actionKey) return actionKey;
+  const sessionKey = 'session_id' in data ? data.session_id : undefined;
+  const sessionId = typeof sessionKey === 'string' ? sessionKey.trim() : '';
+  if (sessionId) return sessionId;
   return `file:${hashPath(filePath)}`;
 }
 
@@ -185,8 +207,8 @@ function getEventDate(data: KiroChatRecord | KiroSessionRecord, filePath: string
   const ts = parseTs(
     data.metadata?.startTime
     ?? data.metadata?.endTime
-    ?? data.created_at
-    ?? data.updated_at,
+    ?? ('created_at' in data ? data.created_at : undefined)
+    ?? ('updated_at' in data ? data.updated_at : undefined),
   );
   if (ts) return Promise.resolve(ts);
   return readFileMtime(filePath);
