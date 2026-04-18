@@ -28,6 +28,10 @@ interface KiroMetadata {
   endTime?: string | number;
 }
 
+interface KiroSelectedModelRecord {
+  selectedModel?: string;
+}
+
 interface KiroModelInfo {
   model_name?: string;
   model_id?: string;
@@ -39,7 +43,7 @@ interface KiroSessionState {
   };
 }
 
-interface KiroSessionRecord {
+interface KiroSessionRecord extends KiroSelectedModelRecord {
   session_id?: string;
   created_at?: string | number;
   updated_at?: string | number;
@@ -47,7 +51,7 @@ interface KiroSessionRecord {
   metadata?: KiroMetadata;
 }
 
-interface KiroChatRecord {
+interface KiroChatRecord extends KiroSelectedModelRecord {
   actionId?: string;
   executionId?: string;
   metadata?: KiroMetadata;
@@ -165,6 +169,7 @@ function getModelNameFromData(data: KiroChatRecord | KiroSessionRecord): string 
   }
 
   if (modelId) return modelId;
+  if (data.selectedModel?.trim()) return data.selectedModel;
   return getModelNameFromMetadata(data.metadata);
 }
 

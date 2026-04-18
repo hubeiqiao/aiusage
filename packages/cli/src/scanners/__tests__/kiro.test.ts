@@ -119,6 +119,23 @@ describe('scanKiroDates', () => {
     expect(breakdown[0].provider).toBe('kiro');
   });
 
+  it('uses selectedModel when metadata model fields are absent', async () => {
+    const day = '2026-01-23';
+    await writeKiroSessionJson(
+      join(tmpDir, 'selected-model.chat'),
+      {
+        selectedModel: 'claude-opus-4.6',
+        created_at: `${day}T10:00:00.000Z`,
+        session_id: 'selected-model',
+      },
+    );
+
+    const result = await scanKiroDates([day], tmpDir);
+    const breakdown = result.get(day) ?? [];
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0].model).toBe('claude-opus-4-6');
+  });
+
   it('counts only event count when scanning multiple same-day files and keeps token fields at zero', async () => {
     const day = '2026-01-19';
     await writeKiroChat(
