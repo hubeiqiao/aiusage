@@ -19,6 +19,10 @@ function writeKiroChat(filePath: string, data: object): Promise<void> {
   return writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
+function writeKiroSessionJson(filePath: string, data: object): Promise<void> {
+  return writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
 describe('scanKiroDates', () => {
   it('extracts a valid chat file as one event with correct date bucket', async () => {
     const day = '2026-01-15';
@@ -147,5 +151,38 @@ describe('scanKiroDates', () => {
     expect(breakdown[0].cachedInputTokens).toBe(0);
     expect(breakdown[0].cacheWriteTokens).toBe(0);
     expect(breakdown[0].reasoningOutputTokens).toBe(0);
+  });
+
+  it('reads Kiro session json files from ~/.kiro sessions format', async () => {
+    const day = '2026-01-20';
+    await writeKiroSessionJson(
+      join(tmpDir, 'session.json'),
+      {
+        session_id: 'session-json-1',
+        created_at: `${day}T11:00:00.000Z`,
+        updated_at: `${day}T11:10:00.000Z`,
+        session_state: {
+          rts_model_state: {
+            model_info: {
+              model_id: 'claude-opus-4.6',
+              model_name: 'claude-opus-4.6',
+            },
+          },
+        },
+      },
+    );
+
+    const result = await scanKiroDates([day], tmpDir);
+    const breakdown = result.get(day) ?? [];
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0]).toEqual(
+      expect.objectContaining({
+        provider: 'kiro',
+        product: 'kiro',
+        model: 'claude-opus-4.6',
+        channel: 'cli',
+        eventCount: 1,
+      }),
+    );
   });
 });

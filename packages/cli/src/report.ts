@@ -333,14 +333,20 @@ async function discoverKiroDates(dates: Set<string>): Promise<void> {
     const content = await safeReadUtf8(filePath);
     if (!content) continue;
 
-    let data: { metadata?: { startTime?: string | number; endTime?: string | number } };
+    let data: {
+      metadata?: { startTime?: string | number; endTime?: string | number };
+      created_at?: string | number;
+      updated_at?: string | number;
+    };
     try {
       data = JSON.parse(content);
     } catch {
       continue;
     }
 
-    const ts = parseTimestamp(data.metadata?.startTime ?? data.metadata?.endTime);
+    const ts = parseTimestamp(
+      data.metadata?.startTime ?? data.metadata?.endTime ?? data.created_at ?? data.updated_at,
+    );
     if (ts) {
       dates.add(toDateKey(ts));
       continue;
@@ -355,6 +361,7 @@ async function discoverFilesInKiroDirs(files: string[]): Promise<void> {
   const dirs = resolveKiroDirs();
   for (const dir of dirs) {
     await walkForFiles(dir, '.chat', files);
+    await walkForFiles(dir, '.json', files);
   }
 }
 
@@ -381,6 +388,7 @@ function resolveKiroDirs(): string[] {
       'globalStorage',
       'kiro.kiroagent',
     ),
+    join(homedir(), '.kiro', 'sessions', 'cli'),
   ];
 }
 

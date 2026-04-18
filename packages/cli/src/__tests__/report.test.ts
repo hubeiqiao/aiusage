@@ -128,4 +128,37 @@ describe('buildLocalReport', () => {
       }),
     );
   });
+
+  it('discovers Kiro session json files in all-history report aggregation', async () => {
+    const day = '2026-08-02';
+    const dir = join(homeDir, '.kiro', 'sessions', 'cli');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'session-01.json'),
+      JSON.stringify({
+        session_id: 'session-01',
+        created_at: `${day}T13:00:00.000Z`,
+        updated_at: `${day}T13:20:00.000Z`,
+        session_state: {
+          rts_model_state: {
+            model_info: {
+              model_id: 'claude-opus-4.6',
+            },
+          },
+        },
+      }),
+      'utf-8',
+    );
+
+    const { buildLocalReport } = await import('../report.js');
+    const report = await buildLocalReport('all');
+
+    expect(report.daily.map((d) => d.usageDate)).toContain(day);
+    expect(report.bySource).toContainEqual(
+      expect.objectContaining({
+        source: 'kiro/kiro',
+        eventCount: 1,
+      }),
+    );
+  });
 });

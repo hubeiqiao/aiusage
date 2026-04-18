@@ -16,7 +16,9 @@ import {
 /**
  * Kiro scanner.
  *
- * 数据目录: ~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent/*.chat
+ * 数据目录:
+ * - ~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent/*.chat
+ * - ~/.kiro/sessions/cli/*.json
  */
 
 interface KiroMetadata {
@@ -26,12 +28,33 @@ interface KiroMetadata {
   endTime?: string | number;
 }
 
+interface KiroModelInfo {
+  model_name?: string;
+  model_id?: string;
+}
+
+interface KiroSessionState {
+  rts_model_state?: {
+    model_info?: KiroModelInfo;
+  };
+}
+
+interface KiroSessionRecord {
+  session_id?: string;
+  created_at?: string | number;
+  updated_at?: string | number;
+  session_state?: KiroSessionState;
+  metadata?: KiroMetadata;
+}
+
 interface KiroChatRecord {
   actionId?: string;
   executionId?: string;
   metadata?: KiroMetadata;
   chat?: unknown[];
 }
+
+type KiroRecord = KiroChatRecord | KiroSessionRecord;
 
 export async function scanKiroDates(
   targetDates: string[],
@@ -43,7 +66,7 @@ export async function scanKiroDates(
 
   const files = (
     await Promise.all(
-      dirs.map((dir) => walkFiles(dir, '.chat')),
+      dirs.flatMap((dir) => [walkFiles(dir, '.chat'), walkFiles(dir, '.json')]),
     )
   ).flat();
 
@@ -60,7 +83,7 @@ export async function scanKiroDates(
       continue;
     }
 
-    let data: KiroChatRecord;
+    let data: KiroRecord;
     try {
       data = JSON.parse(raw);
     } catch {
@@ -77,7 +100,7 @@ export async function scanKiroDates(
     const dayMap = groupedByDate.get(usageDate);
     if (!dayMap) continue;
 
-    const model = getModelName(data.metadata);
+    const model = getModelName(data);
     const project = 'unknown';
 
     accumulate(
@@ -128,34 +151,57 @@ function resolveKiroDirs(baseDir?: string): string[] {
       'globalStorage',
       'kiro.kiroagent',
     ),
+    join(homedir(), '.kiro', 'sessions', 'cli'),
   ];
 }
 
-async function getEventDate(data: KiroChatRecord, filePath: string): Promise<Date | null> {
-  const ts = parseTs(data.metadata?.startTime ?? data.metadata?.endTime);
-  if (ts) return ts;
-  return readFileMtime(filePath);
+function getModelNameFromData(data: KiroChatRecord | KiroSessionRecord): string {
+  const modelId = (
+    data.session_state?.rts_model_state?.model_info?.model_id
+    ?? data.session_state?.rts_model_state?.model_info?.model_name
+  )?.trim();
+  if (modelId) return modelId;
+  return getModelNameFromMetadata(data.metadata);
 }
 
-function getModelName(metadata?: KiroMetadata): string {
+function getModelName(data: KiroRecord): string {
+  return getModelNameFromData(data);
+}
+
+function getModelNameFromMetadata(metadata?: KiroMetadata): string {
   return metadata?.modelId?.trim() || metadata?.modelProvider?.trim() || 'unknown';
 }
 
-function resolveExecutionKey(data: KiroChatRecord, filePath: string): string {
+function resolveExecutionKey(data: KiroChatRecord | KiroSessionRecord, filePath: string): string {
   const candidate = data.executionId ?? data.actionId;
-  const key = typeof candidate === 'string' ? candidate.trim() : '';
-  if (key) return key;
+  const chatKey = typeof candidate === 'string' ? candidate.trim() : '';
+  if (chatKey) return chatKey;
+  const sessionKey = typeof data.session_id === 'string' ? data.session_id.trim() : '';
+  if (sessionKey) return sessionKey;
   return `file:${hashPath(filePath)}`;
+}
+
+function getEventDate(data: KiroChatRecord | KiroSessionRecord, filePath: string): Promise<Date | null> {
+  const ts = parseTs(
+    data.metadata?.startTime
+    ?? data.metadata?.endTime
+    ?? data.created_at
+    ?? data.updated_at,
+  );
+  if (ts) return Promise.resolve(ts);
+  return readFileMtime(filePath);
+}
+
+function readFileMtime(filePath: string): Promise<Date | null> {
+  return (async () => {
+    try {
+      return (await stat(filePath)).mtime;
+    } catch {
+      return null;
+    }
+  })();
 }
 
 function hashPath(filePath: string): string {
   return createHash('sha1').update(filePath).digest('hex');
-}
-
-async function readFileMtime(filePath: string): Promise<Date | null> {
-  try {
-    return (await stat(filePath)).mtime;
-  } catch {
-    return null;
-  }
 }
