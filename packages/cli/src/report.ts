@@ -747,6 +747,27 @@ export function calculateBreakdownCost(breakdown: IngestBreakdown, warnings: Set
     return isFast ? baseCost * FAST_MULTIPLIER : baseCost;
   }
 
+  if (breakdown.provider === 'kiro' && breakdown.product === 'kiro') {
+    const isFast = breakdown.model.endsWith('-fast');
+    const baseModel = isFast ? breakdown.model.replace(/-fast$/, '') : breakdown.model;
+    const resolved = resolveModel(baseModel, CLAUDE_PRICING);
+    if (!resolved) {
+      warnings.add(`Kiro 模型 ${breakdown.model} 未配置公开单价，已跳过成本估算。`);
+      return 0;
+    }
+    if (resolved.normalized) {
+      warnings.add(`Kiro ${breakdown.model} 已按 ${resolved.model} 的公开单价估算。`);
+    }
+    const pricing = CLAUDE_PRICING[resolved.model];
+    return (
+      (breakdown.inputTokens / 1_000_000) * pricing.input +
+      (((breakdown.cacheWrite5mTokens ?? breakdown.cacheWriteTokens) || 0) / 1_000_000) * pricing.cache_write_5m +
+      ((breakdown.cacheWrite1hTokens ?? 0) / 1_000_000) * pricing.cache_write_1h +
+      (breakdown.cachedInputTokens / 1_000_000) * pricing.cache_read +
+      (breakdown.outputTokens / 1_000_000) * pricing.output
+    );
+  }
+
   if (breakdown.provider === 'openai' && breakdown.product === 'codex') {
     const resolved = resolveModel(breakdown.model, OPENAI_PRICING);
     if (!resolved) {

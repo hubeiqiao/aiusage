@@ -161,4 +161,29 @@ describe('buildLocalReport', () => {
       }),
     );
   });
+
+  it('estimates cost for known Kiro models using Claude public rates', async () => {
+    const { calculateBreakdownCost } = await import('../report.js');
+    const warnings = new Set<string>();
+    const cost = calculateBreakdownCost(
+      {
+        provider: 'kiro',
+        product: 'kiro',
+        channel: 'cli',
+        model: 'claude-opus-4-6',
+        project: 'unknown',
+        projectDisplay: 'unknown',
+        eventCount: 1,
+        inputTokens: 1000000,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        outputTokens: 0,
+        reasoningOutputTokens: 0,
+      },
+      warnings,
+    );
+
+    expect(cost).toBeGreaterThan(0);
+    expect(warnings.size).toBe(0);
+  });
 });
