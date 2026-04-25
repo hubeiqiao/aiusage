@@ -42,6 +42,14 @@ interface KiroSessionState {
   rts_model_state?: {
     model_info?: KiroModelInfo;
   };
+  conversation_metadata?: {
+    user_turn_metadatas?: Array<{
+      metering_usage?: Array<{
+        value?: number | string;
+        unit?: string;
+      }>;
+    }>;
+  };
 }
 
 interface KiroSessionRecord extends KiroSelectedModelRecord {
@@ -82,12 +90,15 @@ type KiroRecord = KiroChatRecord | KiroSessionRecord;
 interface KiroTokenTotals {
   input: number;
   output: number;
+  costUSD?: number;
 }
 
 type KiroTokenUsageMap = Map<string, Map<string, KiroTokenTotals>>;
 
 const KIRO_TOKEN_SOURCE = 'tokens_generated.jsonl';
 const KIRO_SQLITE_SOURCE = 'devdata.sqlite';
+const KIRO_OVERAGE_CREDIT_RATE_USD = 0.04;
+const KIRO_DEFAULT_CREDIT_COST_ENABLED = false;
 const KIRO_TOKEN_MODEL_ALIASES: Record<string, string> = {
   qdev: 'claude-opus-4-6',
   agent: 'claude-opus-4-6',
@@ -100,6 +111,7 @@ export async function scanKiroDates(
 ): Promise<Map<string, IngestBreakdown[]>> {
   const targetDateSet = new Set(targetDates);
   const dirs = resolveKiroDirs(baseDir);
+  const shouldEstimateKiroCreditCost = isKiroCreditCostEnabled();
   const tokenUsage = await readKiroTokenUsage(dirs, targetDateSet);
 
   const files = (
@@ -140,6 +152,7 @@ export async function scanKiroDates(
 
     const model = getModelName(data);
     const project = 'unknown';
+    const estimatedCostUsd = shouldEstimateKiroCreditCost ? extractKiroCreditsFromRecord(data) : 0;
 
     accumulate(
       dayMap,
@@ -159,10 +172,30 @@ export async function scanKiroDates(
       },
       { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0 },
     );
+
+    if (estimatedCostUsd > 0) {
+      const usageDateMap = tokenUsage.get(usageDate) ?? new Map<string, KiroTokenTotals>();
+      const usageTotals = usageDateMap.get(model);
+      if (usageTotals) {
+        usageTotals.costUSD = (usageTotals.costUSD ?? 0) + estimatedCostUsd;
+      } else {
+        usageDateMap.set(model, { input: 0, output: 0, costUSD: estimatedCostUsd });
+      }
+      tokenUsage.set(usageDate, usageDateMap);
+    }
   }
 
   applyKiroTokenUsage(groupedByDate, tokenUsage);
   return finalize(groupedByDate);
+}
+
+function isKiroCreditCostEnabled(): boolean {
+  if (!KIRO_DEFAULT_CREDIT_COST_ENABLED) {
+    const raw = process.env.KIRO_USE_CREDIT_COST?.trim()?.toLowerCase();
+    if (!raw) return false;
+    return ['1', 'true', 'on', 'yes', 'enabled'].includes(raw);
+  }
+  return true;
 }
 
 function resolveKiroDirs(baseDir?: string): string[] {
@@ -241,6 +274,9 @@ function applyKiroTokenUsage(groupedByDate: ReturnType<typeof initDateMap>, toke
       if (!breakdown) continue;
       breakdown.inputTokens += usage.input;
       breakdown.outputTokens += usage.output;
+      if (usage.costUSD != null) {
+        breakdown.costUSD = (breakdown.costUSD ?? 0) + usage.costUSD;
+      }
     }
   }
 }
@@ -404,6 +440,36 @@ function readKiroTokenRowsFromDb(dbPath: string, dbApi?: typeof import('node:sql
   } finally {
     db.close();
   }
+}
+
+function extractKiroCreditsFromRecord(data: KiroSessionRecord): number {
+  const meteringEntries = data.session_state?.conversation_metadata?.user_turn_metadatas ?? [];
+  if (!Array.isArray(meteringEntries) || meteringEntries.length === 0) return 0;
+
+  const totalCredits = meteringEntries.reduce((sum, turnMeta) => {
+    const usageEntries = turnMeta.metering_usage;
+    if (!Array.isArray(usageEntries) || usageEntries.length === 0) return sum;
+
+    const turnCredits = usageEntries.reduce((innerSum, usage) => {
+      if (typeof usage?.unit !== 'string' || usage.unit.toLowerCase() !== 'credit') return innerSum;
+      const value = parseCreditValue(usage.value);
+      return innerSum + value;
+    }, 0);
+
+    return sum + turnCredits;
+  }, 0);
+
+  if (totalCredits <= 0) return 0;
+  return totalCredits * KIRO_OVERAGE_CREDIT_RATE_USD;
+}
+
+function parseCreditValue(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? Math.max(0, value) : 0;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  }
+  return 0;
 }
 
 function parseTokenCount(value: unknown): number {

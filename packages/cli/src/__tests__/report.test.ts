@@ -14,14 +14,22 @@ vi.mock('node:os', async () => {
 });
 
 let homeDir: string;
+let originalKiroCreditCostEnv: string | undefined;
 
 beforeEach(async () => {
   homeDir = join(tmpdir(), `aiusage-report-${Date.now()}`);
   mockHomedir.mockReturnValue(homeDir);
   await mkdir(homeDir, { recursive: true });
+  originalKiroCreditCostEnv = process.env.KIRO_USE_CREDIT_COST;
 });
 
 afterEach(async () => {
+  if (originalKiroCreditCostEnv === undefined) {
+    delete process.env.KIRO_USE_CREDIT_COST;
+  } else {
+    process.env.KIRO_USE_CREDIT_COST = originalKiroCreditCostEnv;
+  }
+
   await rm(homeDir, { recursive: true, force: true });
 });
 
@@ -185,5 +193,70 @@ describe('buildLocalReport', () => {
 
     expect(cost).toBeGreaterThan(0);
     expect(warnings.size).toBe(0);
+  });
+
+  it('does not use Kiro session credit estimates by default', async () => {
+    const day = '2026-01-27';
+    const dir = join(homeDir, '.kiro', 'sessions', 'cli');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'session-credits.json'),
+      JSON.stringify({
+        session_id: 'session-credits-01',
+        created_at: `${day}T10:00:00.000Z`,
+        updated_at: `${day}T10:10:00.000Z`,
+        session_state: {
+          conversation_metadata: {
+            user_turn_metadatas: [
+              {
+                metering_usage: [
+                  { value: 0.5, unit: 'credit' },
+                  { value: 0.75, unit: 'credit' },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+      'utf-8',
+    );
+
+    const { buildLocalReport } = await import('../report.js');
+    const report = await buildLocalReport('today', { dates: [day] });
+
+    expect(report.totals.estimatedCostUsd).toBe(0);
+  });
+
+  it('uses Kiro session credit estimates when explicitly enabled', async () => {
+    process.env.KIRO_USE_CREDIT_COST = 'true';
+    const day = '2026-01-27';
+    const dir = join(homeDir, '.kiro', 'sessions', 'cli');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'session-credits.json'),
+      JSON.stringify({
+        session_id: 'session-credits-01',
+        created_at: `${day}T10:00:00.000Z`,
+        updated_at: `${day}T10:10:00.000Z`,
+        session_state: {
+          conversation_metadata: {
+            user_turn_metadatas: [
+              {
+                metering_usage: [
+                  { value: 0.5, unit: 'credit' },
+                  { value: 0.75, unit: 'credit' },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+      'utf-8',
+    );
+
+    const { buildLocalReport } = await import('../report.js');
+    const report = await buildLocalReport('today', { dates: [day] });
+
+    expect(report.totals.estimatedCostUsd).toBe(0.05);
   });
 });

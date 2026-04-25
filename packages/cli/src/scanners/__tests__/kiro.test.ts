@@ -5,13 +5,21 @@ import { tmpdir } from 'node:os';
 import { scanKiroDates } from '../kiro.js';
 
 let tmpDir: string;
+let originalKiroCreditCostEnv: string | undefined;
 
 beforeEach(async () => {
   tmpDir = join(tmpdir(), `aiusage-kiro-test-${Date.now()}`);
   await mkdir(tmpDir, { recursive: true });
+  originalKiroCreditCostEnv = process.env.KIRO_USE_CREDIT_COST;
 });
 
 afterEach(async () => {
+  if (originalKiroCreditCostEnv === undefined) {
+    delete process.env.KIRO_USE_CREDIT_COST;
+  } else {
+    process.env.KIRO_USE_CREDIT_COST = originalKiroCreditCostEnv;
+  }
+
   await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -429,6 +437,91 @@ describe('scanKiroDates', () => {
         cachedInputTokens: 0,
         cacheWriteTokens: 0,
         reasoningOutputTokens: 0,
+      }),
+    );
+  });
+
+  it('does not add estimated cost from metering_usage credit fields by default', async () => {
+    const day = '2026-01-27';
+    await writeKiroSessionJson(
+      join(tmpDir, 'session-credits.json'),
+      {
+        session_id: 'session-credits-01',
+        created_at: `${day}T10:00:00.000Z`,
+        updated_at: `${day}T10:10:00.000Z`,
+        session_state: {
+          conversation_metadata: {
+            user_turn_metadatas: [
+              {
+                metering_usage: [
+                  { value: 0.5, unit: 'credit' },
+                  { value: 0.25, unit: 'credit' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    );
+
+    const result = await scanKiroDates([day], tmpDir);
+    const breakdown = result.get(day) ?? [];
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0]).toEqual(
+      expect.objectContaining({
+        provider: 'kiro',
+        product: 'kiro',
+        channel: 'cli',
+        eventCount: 1,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningOutputTokens: 0,
+      }),
+    );
+    expect(breakdown[0].costUSD ?? 0).toBe(0);
+  });
+
+  it('adds estimated cost from metering_usage credits when explicitly enabled', async () => {
+    process.env.KIRO_USE_CREDIT_COST = 'true';
+    const day = '2026-01-27';
+    await writeKiroSessionJson(
+      join(tmpDir, 'session-credits.json'),
+      {
+        session_id: 'session-credits-01',
+        created_at: `${day}T10:00:00.000Z`,
+        updated_at: `${day}T10:10:00.000Z`,
+        session_state: {
+          conversation_metadata: {
+            user_turn_metadatas: [
+              {
+                metering_usage: [
+                  { value: 0.5, unit: 'credit' },
+                  { value: 0.25, unit: 'credit' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    );
+
+    const result = await scanKiroDates([day], tmpDir);
+    const breakdown = result.get(day) ?? [];
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0]).toEqual(
+      expect.objectContaining({
+        provider: 'kiro',
+        product: 'kiro',
+        channel: 'cli',
+        eventCount: 1,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningOutputTokens: 0,
+        costUSD: 0.03,
       }),
     );
   });
