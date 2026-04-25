@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { IngestBreakdown } from '@aiusage/shared';
@@ -169,6 +169,7 @@ async function discoverAllDates(): Promise<string[]> {
     discoverGenericJsonlDates(join(home, '.factory', 'sessions'), dates),
     discoverGenericJsonDates(join(home, '.local', 'share', 'opencode'), dates),
     discoverGenericJsonlDates(join(home, '.pi', 'agent', 'sessions'), dates),
+    discoverKiroDates(dates),
   ]);
   return [...dates].sort();
 }
@@ -321,6 +322,81 @@ async function discoverCopilotVscodeDates(dates: Set<string>): Promise<void> {
       const ts = parseTimestamp(request.timestamp);
       if (ts) dates.add(toDateKey(ts));
     }
+  }
+}
+
+async function discoverKiroDates(dates: Set<string>): Promise<void> {
+  const files: string[] = [];
+  await discoverFilesInKiroDirs(files);
+
+  for (const filePath of files) {
+    const content = await safeReadUtf8(filePath);
+    if (!content) continue;
+
+    let data: {
+      metadata?: { startTime?: string | number; endTime?: string | number };
+      created_at?: string | number;
+      updated_at?: string | number;
+    };
+    try {
+      data = JSON.parse(content);
+    } catch {
+      continue;
+    }
+
+    const ts = parseTimestamp(
+      data.metadata?.startTime ?? data.metadata?.endTime ?? data.created_at ?? data.updated_at,
+    );
+    if (ts) {
+      dates.add(toDateKey(ts));
+      continue;
+    }
+
+    const fallbackTs = await readFileMtime(filePath);
+    if (fallbackTs) dates.add(toDateKey(fallbackTs));
+  }
+}
+
+async function discoverFilesInKiroDirs(files: string[]): Promise<void> {
+  const dirs = resolveKiroDirs();
+  for (const dir of dirs) {
+    await walkForFiles(dir, '.chat', files);
+    await walkForFiles(dir, '.json', files);
+  }
+}
+
+function resolveKiroDirs(): string[] {
+  const envDir = process.env.KIRO_CHAT_DIR?.trim();
+  if (envDir) return [envDir];
+
+  return [
+    join(
+      homedir(),
+      'Library',
+      'Application Support',
+      'Kiro',
+      'User',
+      'globalStorage',
+      'kiro.kiroagent',
+    ),
+    join(
+      homedir(),
+      'Library',
+      'Application Support',
+      'Code',
+      'User',
+      'globalStorage',
+      'kiro.kiroagent',
+    ),
+    join(homedir(), '.kiro', 'sessions', 'cli'),
+  ];
+}
+
+async function readFileMtime(filePath: string): Promise<Date | null> {
+  try {
+    return (await stat(filePath)).mtime;
+  } catch {
+    return null;
   }
 }
 
@@ -669,6 +745,27 @@ export function calculateBreakdownCost(breakdown: IngestBreakdown, warnings: Set
       (breakdown.cachedInputTokens / 1_000_000) * pricing.cache_read +
       (breakdown.outputTokens / 1_000_000) * pricing.output;
     return isFast ? baseCost * FAST_MULTIPLIER : baseCost;
+  }
+
+  if (breakdown.provider === 'kiro' && breakdown.product === 'kiro') {
+    const isFast = breakdown.model.endsWith('-fast');
+    const baseModel = isFast ? breakdown.model.replace(/-fast$/, '') : breakdown.model;
+    const resolved = resolveModel(baseModel, CLAUDE_PRICING);
+    if (!resolved) {
+      warnings.add(`Kiro 模型 ${breakdown.model} 未配置公开单价，已跳过成本估算。`);
+      return 0;
+    }
+    if (resolved.normalized) {
+      warnings.add(`Kiro ${breakdown.model} 已按 ${resolved.model} 的公开单价估算。`);
+    }
+    const pricing = CLAUDE_PRICING[resolved.model];
+    return (
+      (breakdown.inputTokens / 1_000_000) * pricing.input +
+      (((breakdown.cacheWrite5mTokens ?? breakdown.cacheWriteTokens) || 0) / 1_000_000) * pricing.cache_write_5m +
+      ((breakdown.cacheWrite1hTokens ?? 0) / 1_000_000) * pricing.cache_write_1h +
+      (breakdown.cachedInputTokens / 1_000_000) * pricing.cache_read +
+      (breakdown.outputTokens / 1_000_000) * pricing.output
+    );
   }
 
   if (breakdown.provider === 'openai' && breakdown.product === 'codex') {
