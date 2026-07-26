@@ -51,10 +51,12 @@ packages/shared/src/pricing/
 `catalog.aliases` 是**显式声明**的等价名映射，命中后视为 `exact`：
 
 ```ts
-'claude-opus-4-7-20260201': 'claude-opus-4-7'  // 带日期后缀的版本号
-'gpt-5.6': 'gpt-5.6-sol'                       // 官方系列别名 → Sol
+'claude-fibre-5': 'claude-fable-5'              // 常见误写 → 官方模型名
+'claude-ops-5': 'claude-opus-5'                 // 常见误写 → 官方模型名
+'claude-opus-4-7-20260201': 'claude-opus-4-7'   // 带日期后缀的版本号
+'gpt-5.6': 'gpt-5.6-sol'                        // 官方系列别名 → Sol
 'codex-auto-review': 'gpt-5.4'                  // 工具内部模型 → 实际推理模型
-'k3': 'kimi-k3'                                // Kimi Code 内部别名 → API 模型
+'k3': 'kimi-k3'                                 // Kimi Code 内部别名 → API 模型
 ```
 
 `alias` 与 **前缀回退** 是两种不同机制：
@@ -71,6 +73,13 @@ fx: { CNY: 7.2 }  // 1 USD = N CNY
 ```
 
 Worker 启动时可通过 env 覆盖（暂未实现，规划中）。
+
+## 服务档位倍率
+
+模型名后缀 `-fast` / `-priority` 会先剥离为基础模型，再按 provider/product 应用倍率：
+
+- Anthropic：`claude-opus-5-fast` 与 `claude-opus-4-8-fast` 按官方 fast mode 价折算为 `2x`；`claude-opus-4-7-fast` 只保留历史日志重算的 `6x`；`claude-opus-4-6-fast` 现按标准价
+- OpenAI Codex：`-priority` / 部分 `-fast` 按 Codex speed/API priority 口径处理
 
 ## 阶梯定价
 
