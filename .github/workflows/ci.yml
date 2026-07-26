@@ -123,4 +123,4 @@ jobs:
           }
 
           publish_if_new packages/cli true
-          publish_if_new packages/pricing true
+          publish_if_new packages/pricing false
