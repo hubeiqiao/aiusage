@@ -25,6 +25,15 @@ export interface AIUsageConfig {
   privacy?: {
     projectVisibility?: 'hidden' | 'masked' | 'plain';
   };
+  pricing?: {
+    mode?: 'auto' | 'manual' | 'offline';
+    url?: string;
+    cacheTtlHours?: number;
+  };
+  scanner?: {
+    /** Extra OpenCode databases outside XDG_DATA_HOME/opencode. */
+    opencodeDbPaths?: string[];
+  };
   lang?: 'en' | 'zh';
   emoji?: boolean;
 
@@ -61,6 +70,8 @@ function migrateConfig(config: AIUsageConfig): AIUsageConfig {
     lookbackDays: config.lookbackDays,
     projectAliases: config.projectAliases,
     privacy: config.privacy,
+    pricing: config.pricing,
+    scanner: config.scanner,
     lang: config.lang,
     emoji: config.emoji,
     targets: [target],
@@ -160,6 +171,48 @@ export function setConfigValue(
       throw new Error('privacy.projectVisibility 仅支持 hidden、masked、plain');
     }
     next.privacy = { ...(next.privacy ?? {}), projectVisibility: value };
+    return next;
+  }
+
+  if (keyPath === 'pricing.mode') {
+    const value = requireSingleValue(keyPath, values);
+    if (value !== 'auto' && value !== 'manual' && value !== 'offline') {
+      throw new Error('pricing.mode 仅支持 auto、manual、offline');
+    }
+    next.pricing = { ...(next.pricing ?? {}), mode: value };
+    return next;
+  }
+
+  if (keyPath === 'pricing.url') {
+    const value = requireSingleValue(keyPath, values);
+    next.pricing = { ...(next.pricing ?? {}) };
+    if (value === 'default' || value === 'none' || value === 'off') {
+      delete next.pricing.url;
+    } else {
+      next.pricing.url = normalizeServerUrl(value);
+    }
+    return next;
+  }
+
+  if (keyPath === 'pricing.cacheTtlHours') {
+    next.pricing = {
+      ...(next.pricing ?? {}),
+      cacheTtlHours: parsePositiveInt(requireSingleValue(keyPath, values), keyPath),
+    };
+    return next;
+  }
+
+  if (keyPath === 'scanner.opencodeDbPaths') {
+    const paths = [...new Set(values.map(value => value.trim()).filter(Boolean))];
+    if (paths.length === 0) {
+      throw new Error('scanner.opencodeDbPaths 至少需要一个 opencode*.db 路径');
+    }
+    if (paths.length === 1 && ['none', 'off', 'default'].includes(paths[0].toLowerCase())) {
+      next.scanner = { ...(next.scanner ?? {}) };
+      delete next.scanner.opencodeDbPaths;
+      return next;
+    }
+    next.scanner = { ...(next.scanner ?? {}), opencodeDbPaths: paths };
     return next;
   }
 

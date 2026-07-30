@@ -1,7 +1,7 @@
 // ── 统计维度 ──
 
-export type Provider = 'anthropic' | 'openai' | 'google' | 'github' | 'alibaba' | 'moonshot' | 'sourcegraph' | 'inflection' | 'cursor' | 'kiro' | (string & {});
-export type Product = 'claude-code' | 'codex' | 'copilot-cli' | 'copilot-vscode' | 'gemini-cli' | 'antigravity' | 'qwen-code' | 'kimi-code' | 'amp' | 'droid' | 'opencode' | 'pi' | 'cursor' | 'kiro' | (string & {});
+export type Provider = 'anthropic' | 'openai' | 'google' | 'github' | 'alibaba' | 'moonshot' | 'sourcegraph' | 'inflection' | 'cursor' | 'kiro' | 'trae' | 'zhipu' | (string & {});
+export type Product = 'claude-code' | 'codex' | 'copilot-cli' | 'copilot-vscode' | 'gemini-cli' | 'antigravity' | 'qwen-code' | 'kimi-code' | 'amp' | 'droid' | 'opencode' | 'pi' | 'cursor' | 'kiro' | 'trae' | 'trae-cn' | 'trae-intl' | (string & {});
 export type Channel = 'cli' | 'ide' | 'web' | 'api';
 export type CostStatus = 'exact' | 'estimated' | 'unavailable';
 export type DeviceStatus = 'active' | 'disabled';
@@ -49,6 +49,24 @@ export interface IngestBreakdown {
   outputTokens: number;
   reasoningOutputTokens: number;
   costUSD?: number;
+  pricingVersion?: string;
+}
+
+export interface IngestActivityDay {
+  items: IngestActivityItem[];
+}
+
+export interface IngestActivityItem {
+  provider: Provider;
+  product: Product;
+  source: string;
+  project: string;
+  projectDisplay?: string;
+  projectAlias?: string;
+  kind: string;
+  name: string;
+  count: number;
+  confidence: 'exact' | 'proxy';
 }
 
 export interface IngestActivityDay {
@@ -119,8 +137,26 @@ export interface OverviewResponse {
   sankey: SankeyGraph;
   heatmap: HeatmapDay[];
   interactionMetrics?: InteractionMetricsPayload;
+  comparison?: OverviewComparisonPayload | null;
   filters: DashboardFiltersPayload;
 }
+
+export interface OverviewComparisonPayload {
+  activeDays: number;
+  totalEvents: number;
+  totalSessions: number;
+  totalCostUsd: number;
+  averageDailyCostUsd: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+  cacheHitRate: number;
+  userMessageCount?: number;
+}
+
 
 export interface InteractionMetricItem {
   value: string;
@@ -201,12 +237,12 @@ export interface FacetOption {
 export interface DashboardFiltersPayload {
   selection: {
     range: string;
-    deviceId: string | null;
-    provider: string | null;
-    product: string | null;
-    channel: string | null;
-    model: string | null;
-    project: string | null;
+    deviceId: string[];
+    provider: string[];
+    product: string[];
+    channel: string[];
+    model: string[];
+    project: string[];
   };
   options: {
     devices: FacetOption[];

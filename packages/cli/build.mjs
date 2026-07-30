@@ -1,4 +1,5 @@
 import { build } from 'esbuild';
+import { copyFile } from 'node:fs/promises';
 
 await build({
   entryPoints: ['src/cli.ts'],
@@ -8,7 +9,9 @@ await build({
   format: 'esm',
   outfile: 'dist/cli.js',
   banner: { js: '#!/usr/bin/env node' },
-  external: [],
+  external: ['ws'],
   minifySyntax: true,
   treeShaking: true,
 });
+
+await copyFile('../pricing/catalog.json', 'pricing-catalog.json');
