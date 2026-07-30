@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { hostname } from 'node:os';
-import { scanDate, scanDates } from './scan.js';
+import { parseToolSelection, scanDate, scanDates } from './scan.js';
 import { scanAnthropicApiDates } from './scanners/anthropic-admin-api.js';
 import { scanAnthropicCsvDates } from './scanners/anthropic-csv.js';
 import { buildLocalReport, parseReportRange } from './report.js';
-import { buildActivityReport, groupActivityItemsByDate } from './activity.js';
 import { renderReport } from './render.js';
+import { buildActivityReport, renderActivityReport, type ActivityItem } from './activity.js';
 import {
   type AIUsageConfig,
   type SyncTarget,
@@ -24,50 +24,92 @@ import { disableSchedule, enableSchedule, formatInterval, getScheduleStatus, par
 import { runDoctor } from './doctor.js';
 import { getVersion } from './version.js';
 import { discoverProjects } from './project.js';
-import type { IngestDay } from '@aiusage/shared';
+import { applyPrivacy, applyActivityPrivacy } from './privacy.js';
+import type { IngestActivityItem, IngestDay } from '@aiusage/shared';
+import { getPricingStatus, resolvePricingCatalog } from './pricing.js';
+import { syncTraeCnUsage } from './trae-sync.js';
+import { syncTraeIntlUsage } from './trae-intl-sync.js';
 
 const argv = process.argv.slice(2);
 const command = argv[0];
 
+await (async () => {
 try {
   if (command === '--version' || command === '-v') {
     console.log(getVersion());
   } else if (command === 'scan') {
     const parsed = parseArgs(argv.slice(1));
-    const date = typeof parsed.flags.date === 'string' ? parsed.flags.date : getYesterdayDate();
-    await runScan(date, Boolean(parsed.flags.json));
+    if (parsed.flags.help) return helpForSubcommand('scan');
+    await runScan(parsed.flags, parsed.positionals);
   } else if (command === 'report') {
     const parsed = parseArgs(argv.slice(1));
-    await runReport(parsed.flags);
+    if (parsed.flags.help) return helpForSubcommand('report');
+    await runReport(parsed.flags, parsed.positionals);
+  } else if (command === 'activity') {
+    const parsed = parseArgs(argv.slice(1));
+    if (parsed.flags.help) return helpForSubcommand('activity');
+    await runActivity(parsed.flags, parsed.positionals);
   } else if (command === 'health') {
     const parsed = parseArgs(argv.slice(1));
+    if (parsed.flags.help) return helpForSubcommand('health');
     await runHealth(parsed.flags);
   } else if (command === 'enroll') {
     const parsed = parseArgs(argv.slice(1));
+    if (parsed.flags.help) return helpForSubcommand('enroll');
     await runEnroll(parsed.flags);
   } else if (command === 'sync') {
     const parsed = parseArgs(argv.slice(1));
-    await runSync(parsed.flags);
+    if (parsed.flags.help) return helpForSubcommand('sync');
+    await runSync(parsed.flags, parsed.positionals);
+  } else if (command === 'trae') {
+    const sub = argv[1];
+    const parsed = parseArgs(argv.slice(2));
+    if (sub === '--help' || sub === '-h' || parsed.flags.help) return helpForSubcommand('trae');
+    if (sub === 'sync') {
+      await runTraeSync(parsed.flags, parsed.positionals);
+    } else {
+      const zh = (await readConfig()).lang === 'zh';
+      throw new Error(zh
+        ? '用法: aiusage trae sync [--edition cn|intl|all] [--since 180] [--port 9230] [--no-launch] [--json]'
+        : 'Usage: aiusage trae sync [--edition cn|intl|all] [--since 180] [--port 9230] [--no-launch] [--json]');
+    }
   } else if (command === 'init') {
     const parsed = parseArgs(argv.slice(1));
+    if (parsed.flags.help) return helpForSubcommand('init');
     await runInit(parsed.flags);
   } else if (command === 'schedule') {
     const sub = argv[1];
+    if (sub === '--help' || sub === '-h') return helpForSubcommand('schedule');
     if (sub === 'off') {
       await runSchedule('off', {});
     } else if (sub === 'status') {
       await runSchedule('status', {});
     } else if (sub === 'on') {
       const parsed = parseArgs(argv.slice(2));
+      if (parsed.flags.help) return helpForSubcommand('schedule');
       await runSchedule('on', parsed.flags);
     } else {
       // 无子命令 → 默认启用 5m
       const parsed = parseArgs(argv.slice(1));
+      if (parsed.flags.help) return helpForSubcommand('schedule');
       await runSchedule('on', parsed.flags);
     }
   } else if (command === 'doctor') {
     const parsed = parseArgs(argv.slice(1));
+    if (parsed.flags.help) return helpForSubcommand('doctor');
     await runDoctorCommand(parsed.flags);
+  } else if (command === 'pricing') {
+    const sub = argv[1];
+    const parsed = parseArgs(argv.slice(2));
+    if (sub === '--help' || sub === '-h' || parsed.flags.help) return helpForSubcommand('pricing');
+    if (sub === 'update') {
+      await runPricingUpdate(parsed.flags);
+    } else if (sub === 'status' || sub === undefined) {
+      await runPricingStatus(parsed.flags);
+    } else {
+      const zh = (await readConfig()).lang === 'zh';
+      throw new Error(`${zh ? '未知子命令' : 'Unknown subcommand'}: pricing ${sub}`);
+    }
   } else if (command === 'config' && argv[1] === 'set') {
     await runConfigSet(argv.slice(2));
   } else if (command === 'project') {
@@ -89,6 +131,7 @@ try {
     }
   } else if (command === 'import') {
     const parsed = parseArgs(argv.slice(1));
+    if (parsed.flags.help) return helpForSubcommand('import');
     await runImport(parsed.flags, parsed.positionals);
   } else if (command === 'setup') {
     console.log('To deploy the server, clone the repo and run the setup wizard:\n');
@@ -112,19 +155,46 @@ try {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 }
+})();
 
-async function runScan(date: string, isJson: boolean) {
+async function runScan(flags: Record<string, string | boolean>, positionals: string[] = []) {
   const config = await readConfig();
   const zh = config.lang === 'zh';
-  if (!isJson) console.log(`${zh ? '扫描日期' : 'Scan date'}: ${date}\n`);
+  assertNoPositionals('scan', positionals, zh);
 
-  const result = await scanDate(date, { projectAliases: config.projectAliases });
+  const isJson = Boolean(flags.json);
+  const dates = resolveScanDates(flags, config);
+  const tools = parseToolSelection(flags.tool, zh);
+  const opencodeDbPaths = config.scanner?.opencodeDbPaths;
+  const results = dates.length === 1
+    ? [await scanDate(dates[0], { projectAliases: config.projectAliases, opencodeDbPaths, tools })]
+    : await scanDates(dates, { projectAliases: config.projectAliases, opencodeDbPaths, tools });
 
   if (isJson) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(results.length === 1 ? results[0] : results, null, 2));
     return;
   }
 
+  if (results.length === 1) {
+    console.log(`${zh ? '扫描日期' : 'Scan date'}: ${results[0].usageDate}\n`);
+    printScanResult(results[0], zh);
+    return;
+  }
+
+  console.log(`${zh ? '扫描范围' : 'Scan range'}: ${dates[0]} ~ ${dates[dates.length - 1]} (${dates.length} ${zh ? '天' : 'days'})\n`);
+  const daysWithData = results.filter(result => result.breakdowns.length > 0);
+  if (daysWithData.length === 0) {
+    console.log(zh ? '该范围无数据。' : 'No data in this range.');
+    return;
+  }
+
+  for (const result of daysWithData) {
+    console.log(`══ ${result.usageDate} ══`);
+    printScanResult(result, zh);
+  }
+}
+
+function printScanResult(result: Awaited<ReturnType<typeof scanDate>>, zh: boolean) {
   if (result.breakdowns.length === 0) {
     console.log(zh ? '该日无数据。' : 'No data for this date.');
     return;
@@ -149,14 +219,33 @@ async function runScan(date: string, isJson: boolean) {
 
   console.log('── 合计 ──');
   console.log(`  事件: ${result.totals.eventCount}  输入: ${fmt(result.totals.inputTokens)}  缓存读: ${fmt(result.totals.cachedInputTokens)}  缓存写: ${fmt(result.totals.cacheWriteTokens)}  输出: ${fmt(result.totals.outputTokens)}  推理: ${fmt(result.totals.reasoningOutputTokens)}`);
+  console.log();
 }
 
-async function runReport(flags: Record<string, string | boolean>) {
+async function runReport(flags: Record<string, string | boolean>, positionals: string[] = []) {
   const config = await readConfig();
+  const zh = config.lang === 'zh';
+  assertNoPositionals('report', positionals, zh);
 
   // 日期解析：--from/--start, --to/--end, --date, --today, --range, --lookback
   const { dates, range } = resolveDateParams(flags, config);
-  const report = await buildLocalReport(range, { projectAliases: config.projectAliases, dates });
+  const tools = parseToolSelection(flags.tool, zh);
+  const targetName = resolveOptionalString(flags.target, undefined);
+  const pricingTarget = targetName
+    ? findTargetOrThrow(config, targetName)
+    : config.targets?.[0];
+  const pricing = await resolvePricingCatalog(config, {
+    explicitUrl: resolveOptionalString(flags['pricing-url'], undefined),
+    target: pricingTarget,
+  });
+  const report = await buildLocalReport(range, {
+    projectAliases: config.projectAliases,
+    opencodeDbPaths: config.scanner?.opencodeDbPaths,
+    dates,
+    tools,
+    pricingCatalog: pricing.catalog,
+    pricingInfo: pricing.info,
+  });
 
   if (flags.json) {
     console.log(JSON.stringify(report, null, 2));
@@ -168,6 +257,26 @@ async function runReport(flags: Record<string, string | boolean>) {
   const detail = flags.detail === true;
 
   console.log(renderReport(report, { lang, emoji, detail }));
+}
+
+async function runActivity(flags: Record<string, string | boolean>, positionals: string[] = []) {
+  const config = await readConfig();
+  assertNoPositionals('activity', positionals, config.lang === 'zh');
+
+  const { dates, range } = resolveDateParams(flags, config);
+  const report = await buildActivityReport(range, {
+    projectAliases: config.projectAliases,
+    dates,
+  });
+
+  if (flags.json) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  const emoji = flags['no-emoji'] === true ? false : (config.emoji ?? true);
+  const detail = flags.detail === true;
+  console.log(renderActivityReport(report, { emoji, detail }));
 }
 
 function fmt(n: number): string {
@@ -248,8 +357,15 @@ function prompt(question: string): Promise<string> {
   });
 }
 
-async function runSync(flags: Record<string, string | boolean>) {
+async function runSync(flags: Record<string, string | boolean>, positionals: string[] = []) {
   const config = await readConfig();
+  assertNoPositionals('sync', positionals, config.lang === 'zh');
+  if (flags.tool != null) {
+    throw new Error(config.lang === 'zh'
+      ? '--tool 仅用于 scan/report；sync 始终上传所选日期的完整快照'
+      : '--tool is only available for scan/report; sync always uploads complete daily snapshots');
+  }
+
   const allTargets = config.targets ?? [];
   if (allTargets.length === 0) {
     throw new Error('未配置任何上报目标，请先执行 aiusage enroll');
@@ -273,19 +389,23 @@ async function runSync(flags: Record<string, string | boolean>) {
   console.log(`扫描 ${targetDates.length} 天 (${targetDates[0]} ~ ${targetDates[targetDates.length - 1]}) ...`);
 
   const [results, activityReport] = await Promise.all([
-    scanDates(targetDates, { projectAliases: config.projectAliases }),
-    buildActivityReport(range, { projectAliases: config.projectAliases, dates: targetDates }),
+    scanDates(targetDates, {
+      projectAliases: config.projectAliases,
+      opencodeDbPaths: config.scanner?.opencodeDbPaths,
+    }),
+    buildActivityReport('all', { dates: targetDates, projectAliases: config.projectAliases }),
   ]);
-  const activityByDate = groupActivityItemsByDate(activityReport.items);
+  const visibility = config.privacy?.projectVisibility;
+  const resultsByDate = new Map(results.map(result => [result.usageDate, result]));
+  const activityByDate = buildActivityPayloadByDate(activityReport.items, visibility);
+  // --include-empty 会连空白日一起上传。配合服务端「以本次上传为准」的整日清理，
+  // 这是把某一天纠正为「无用量」的唯一手段。
   const includeEmptyDays = flags['include-empty'] === true;
-  const allDays: IngestDay[] = results
-    .map((r) => {
-      const activityItems = activityByDate.get(r.usageDate);
-      return {
-        usageDate: r.usageDate,
-        breakdowns: r.breakdowns,
-        ...(activityItems?.length ? { activity: { items: activityItems } } : {}),
-      };
+  const allDays: IngestDay[] = targetDates
+    .map((usageDate) => {
+      const breakdowns = applyPrivacy(resultsByDate.get(usageDate)?.breakdowns ?? [], visibility);
+      const activity = activityByDate.get(usageDate);
+      return { usageDate, breakdowns, activity };
     })
     .filter(day => includeEmptyDays || day.breakdowns.length > 0 || (day.activity?.items.length ?? 0) > 0);
 
@@ -343,6 +463,120 @@ async function runSync(flags: Record<string, string | boolean>) {
     uploadedDays: allDays.map(day => day.usageDate),
     results: uploadResults,
   }, null, 2));
+}
+
+async function runTraeSync(flags: Record<string, string | boolean>, positionals: string[] = []) {
+  const config = await readConfig();
+  const zh = config.lang === 'zh';
+  assertNoPositionals('trae sync', positionals, zh);
+
+  const portFlag = resolveOptionalString(flags.port, undefined);
+  const port = portFlag ? parsePositiveInt(portFlag, '--port') : undefined;
+  if (port != null && port > 65_535) throw new Error('--port 必须在 1 到 65535 之间');
+  const edition = parseTraeEdition(flags.edition, zh);
+  const sinceFlag = resolveOptionalString(flags.since, undefined);
+  const sinceDays = sinceFlag ? parsePositiveInt(sinceFlag, '--since') : undefined;
+
+  if (!flags.json) {
+    if (edition === 'cn' || edition === 'all') {
+      console.log(zh
+        ? '正在通过 Trae CN 官方本地接口同步历史用量…'
+        : 'Syncing Trae CN history through its official local interface…');
+    }
+    if (edition === 'intl' || edition === 'all') {
+      console.log(zh
+        ? '正在通过 Trae 国际版官方账号 API 同步用量…'
+        : 'Syncing Trae International account usage through its official API…');
+    }
+  }
+
+  let cnResult: Awaited<ReturnType<typeof syncTraeCnUsage>> | undefined;
+  let intlResult: Awaited<ReturnType<typeof syncTraeIntlUsage>> | undefined;
+  const warnings: string[] = [];
+
+  if (edition === 'cn' || edition === 'all') {
+    try {
+      cnResult = await syncTraeCnUsage({
+        port,
+        appPath: resolveOptionalString(flags.app, undefined),
+        launch: flags['no-launch'] !== true,
+      });
+    } catch (error) {
+      if (edition === 'cn') throw error;
+      warnings.push(`Trae CN: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (edition === 'intl' || edition === 'all') {
+    try {
+      intlResult = await syncTraeIntlUsage({ sinceDays });
+    } catch (error) {
+      if (edition === 'intl') throw error;
+      warnings.push(`Trae International: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (!cnResult && !intlResult) throw new Error(warnings.join('\n') || '没有可同步的 Trae 数据源');
+
+  if (flags.json) {
+    const payload = edition === 'cn' ? cnResult : edition === 'intl' ? intlResult : {
+      edition: 'all',
+      cn: cnResult,
+      intl: intlResult,
+      warnings,
+    };
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+
+  if (cnResult) {
+    console.log(zh
+      ? `Trae CN：已同步 ${cnResult.sessions} 个会话、${cnResult.events} 条用量记录，共 ${fmt(cnResult.totals.totalTokens)} tokens。`
+      : `Trae CN: synced ${cnResult.sessions} sessions and ${cnResult.events} usage records (${fmt(cnResult.totals.totalTokens)} tokens).`);
+    console.log(`${zh ? '缓存' : 'Cache'}: ${cnResult.cacheDir}`);
+    for (const warning of cnResult.warnings) warnings.push(`Trae CN: ${warning}`);
+  }
+  if (intlResult) {
+    console.log(zh
+      ? `Trae 国际版：本次获取 ${intlResult.fetchedSessions} 个会话，缓存共 ${intlResult.storedSessions} 个会话、${fmt(intlResult.totals.totalTokens)} tokens。`
+      : `Trae International: fetched ${intlResult.fetchedSessions} sessions; cache now contains ${intlResult.storedSessions} sessions (${fmt(intlResult.totals.totalTokens)} tokens).`);
+    console.log(`${zh ? '缓存' : 'Cache'}: ${intlResult.cacheDir}`);
+  }
+  for (const warning of warnings) console.warn(`${zh ? '警告' : 'Warning'}: ${warning}`);
+}
+
+function parseTraeEdition(value: string | boolean | undefined, zh: boolean): 'cn' | 'intl' | 'all' {
+  if (value == null) return 'cn';
+  if (value === 'cn' || value === 'intl' || value === 'all') return value;
+  throw new Error(zh
+    ? '--edition 仅支持 cn、intl、all'
+    : '--edition only supports cn, intl, or all');
+}
+
+function buildActivityPayloadByDate(
+  items: ActivityItem[],
+  visibility: Parameters<typeof applyActivityPrivacy>[1],
+): Map<string, { items: IngestActivityItem[] }> {
+  const map = new Map<string, { items: IngestActivityItem[] }>();
+  // 按天分组前先脱敏并聚合，避免 hidden 模式折叠 project 后撞上服务端活动表主键
+  const sanitized = applyActivityPrivacy(items, visibility);
+  for (const item of sanitized) {
+    const day = map.get(item.usageDate) ?? { items: [] };
+    day.items.push({
+      provider: item.provider,
+      product: item.product,
+      source: item.source,
+      project: item.project,
+      projectDisplay: item.projectDisplay,
+      projectAlias: item.projectAlias,
+      kind: item.kind,
+      name: item.name,
+      count: item.count,
+      confidence: item.confidence,
+    });
+    map.set(item.usageDate, day);
+  }
+  return map;
 }
 
 async function runImport(flags: Record<string, string | boolean>, positionals: string[] = []) {
@@ -429,6 +663,10 @@ async function runImport(flags: Record<string, string | boolean>, positionals: s
     }
     console.log(`Found data for ${allDays.length} days. Uploading...`);
   }
+
+  // 上传前按隐私策略脱敏（默认 masked：basename + 8 字符短哈希）
+  const visibility = config.privacy?.projectVisibility;
+  allDays = allDays.map(d => ({ usageDate: d.usageDate, breakdowns: applyPrivacy(d.breakdowns, visibility) }));
 
   for (const target of targets) {
     if (!target.deviceToken) {
@@ -532,6 +770,43 @@ async function runDoctorCommand(flags: Record<string, string | boolean>) {
   if (failures.length > 0) process.exitCode = 1;
 }
 
+async function runPricingStatus(flags: Record<string, string | boolean>) {
+  const config = await readConfig();
+  const status = await getPricingStatus(config);
+  if (flags.json) {
+    console.log(JSON.stringify(status, null, 2));
+    return;
+  }
+
+  console.log(`模式: ${status.mode}`);
+  if (status.configuredUrl) console.log(`配置源: ${status.configuredUrl}`);
+  console.log(`缓存: ${status.cachePath}`);
+  if (status.cache) {
+    console.log(`缓存版本: ${status.cache.version}`);
+    console.log(`缓存来源: ${status.cache.sourceUrl}`);
+    console.log(`缓存时间: ${status.cache.fetchedAt}`);
+  } else {
+    console.log('缓存版本: (无)');
+  }
+  console.log(`内置版本: ${status.bundled.version}`);
+}
+
+async function runPricingUpdate(flags: Record<string, string | boolean>) {
+  const config = await readConfig();
+  const targetName = resolveOptionalString(flags.target, undefined);
+  const target = targetName ? findTargetOrThrow(config, targetName) : config.targets?.[0];
+  const pricing = await resolvePricingCatalog(config, {
+    forceRefresh: true,
+    explicitUrl: resolveOptionalString(flags.url, undefined),
+    target,
+  });
+
+  console.log(JSON.stringify({
+    cachePath: (await getPricingStatus(config)).cachePath,
+    pricing: pricing.info,
+  }, null, 2));
+}
+
 async function runConfigSet(args: string[]) {
   const [keyPath, ...values] = args;
   if (!keyPath) throw new Error('config set 缺少配置项');
@@ -629,14 +904,26 @@ async function runProjectAlias(args: string[]) {
   console.log(zh ? `已设置: ${name} → ${alias}` : `Set: ${name} → ${alias}`);
 }
 
+/**
+ * 子命令 --help：临时方案是统一回退到顶层 printHelp，避免子命令把 --help 当数据吃掉。
+ * 未来可按 subcommand 输出更精细的用法（参数表 + 示例），目前简单一致更重要。
+ */
+async function helpForSubcommand(_command: string): Promise<void> {
+  const zh = (await readConfig().catch(() => ({ lang: 'en' as const }))).lang === 'zh';
+  printHelp(zh);
+}
+
 function printHelp(zh = false) {
   console.log(`aiusage v${getVersion()}\n`);
   const cmds = zh ? [
-    ['scan [--date YYYY-MM-DD] [--json]',                    '扫描某日用量明细'],
-    ['report [--today] [--range 7d|1m|3m|all] [--detail] [--json]', '本地用量报告'],
-    ['sync [--today] [--range 7d|1m|3m|all] [--include-empty]',   '上传用量到服务端'],
-    ['report/sync --from YYYY-MM-DD [--to YYYY-MM-DD]',           '指定日期范围（--start/--end 同义）'],
+    ['scan [--tool 工具] [--date YYYY-MM-DD|--today|--range 7d|1m|3m|6m] [--json]', '扫描用量明细'],
+    ['report [--tool 工具] [--range 7d|1m|3m|6m|all] [--detail] [--json]', '本地用量报告'],
+    ['activity [--today] [--range 7d|1m|3m|6m|all] [--detail] [--json]', '本地交互指标'],
+    ['sync [--today] [--range 7d|1m|3m|6m] [--include-empty]',       '上传用量到服务端'],
+    ['trae sync [--edition cn|intl|all] [--since 180]',           '同步 Trae CN/国际版用量'],
+    ['scan/report/sync --from YYYY-MM-DD [--to YYYY-MM-DD]',      '指定日期范围（--start/--end 同义）'],
     ['project [list|alias]',                                  '项目管理与别名设置'],
+    ['pricing [status|update] [--url URL]',                   '查看/更新定价目录'],
     ['schedule [on|off|status] [--every 5m]',                '定时同步管理'],
     ['doctor',                                               '诊断检查'],
     ['config set <key> <value>',                             '修改配置'],
@@ -644,11 +931,14 @@ function printHelp(zh = false) {
     ['enroll --server URL --site-id ID --enroll-token TOKEN','注册设备到服务端'],
     ['health [--server URL]',                                '测试服务端连通性'],
   ] : [
-    ['scan [--date YYYY-MM-DD] [--json]',                    'Scan daily usage breakdown'],
-    ['report [--today] [--range 7d|1m|3m|all] [--detail] [--json]', 'Local usage report'],
-    ['sync [--today] [--range 7d|1m|3m|all] [--include-empty]',   'Upload usage to server'],
-    ['report/sync --from YYYY-MM-DD [--to YYYY-MM-DD]',           'Date range (--start/--end aliases)'],
+    ['scan [--tool TOOL] [--date YYYY-MM-DD|--today|--range 7d|1m|3m|6m] [--json]', 'Scan usage breakdown'],
+    ['report [--tool TOOL] [--range 7d|1m|3m|6m|all] [--detail] [--json]', 'Local usage report'],
+    ['activity [--today] [--range 7d|1m|3m|6m|all] [--detail] [--json]', 'Local interaction metrics'],
+    ['sync [--today] [--range 7d|1m|3m|6m] [--include-empty]',       'Upload usage to server'],
+    ['trae sync [--edition cn|intl|all] [--since 180]',           'Sync Trae CN/International usage'],
+    ['scan/report/sync --from YYYY-MM-DD [--to YYYY-MM-DD]',      'Date range (--start/--end aliases)'],
     ['project [list|alias]',                                 'Project management & aliases'],
+    ['pricing [status|update] [--url URL]',                  'Pricing catalog management'],
     ['schedule [on|off|status] [--every 5m]',                'Scheduled sync management'],
     ['doctor',                                               'Run diagnostics'],
     ['config set <key> <value>',                             'Update config'],
@@ -671,18 +961,24 @@ function printHelp(zh = false) {
 function printUsageHint(zh = false) {
   console.log(`aiusage v${getVersion()}\n`);
   const cmds = zh ? [
-    ['scan [--date YYYY-MM-DD]',              '扫描某日用量明细'],
-    ['report [--today] [--range 7d|1m|3m|all]', '本地用量报告'],
-    ['sync [--today] [--range 7d|1m|3m|all]',  '上传用量到服务端'],
+    ['scan [--tool 工具] [--date YYYY-MM-DD|--range 1m|6m]',   '扫描用量明细'],
+    ['report [--tool 工具] [--range 7d|1m|3m|6m|all]', '本地用量报告'],
+    ['activity [--range 7d|1m|3m|6m|all]',       '本地交互指标'],
+    ['sync [--today] [--range 7d|1m|3m|6m]',     '上传用量到服务端'],
+    ['trae sync [--edition cn|intl|all]',        '同步 Trae CN/国际版用量'],
     ['project [list|alias]',                  '项目管理与别名设置'],
+    ['pricing [status|update]',               '查看/更新定价目录'],
     ['schedule [on|off|status]',              '定时同步管理'],
     ['doctor',                                '诊断检查'],
     ['config set <key> <value>',              '修改配置'],
   ] : [
-    ['scan [--date YYYY-MM-DD]',              'Scan daily usage breakdown'],
-    ['report [--today] [--range 7d|1m|3m|all]', 'Local usage report'],
-    ['sync [--today] [--range 7d|1m|3m|all]',  'Upload usage to server'],
+    ['scan [--tool TOOL] [--date YYYY-MM-DD|--range 1m|6m]',   'Scan usage breakdown'],
+    ['report [--tool TOOL] [--range 7d|1m|3m|6m|all]', 'Local usage report'],
+    ['activity [--range 7d|1m|3m|6m|all]',       'Local interaction metrics'],
+    ['sync [--today] [--range 7d|1m|3m|6m]',     'Upload usage to server'],
+    ['trae sync [--edition cn|intl|all]',        'Sync Trae CN/International usage'],
     ['project [list|alias]',                  'Project management & aliases'],
+    ['pricing [status|update]',               'Pricing catalog management'],
     ['schedule [on|off|status]',              'Scheduled sync management'],
     ['doctor',                                'Run diagnostics'],
     ['config set <key> <value>',              'Update config'],
@@ -731,6 +1027,22 @@ function parseArgs(args: string[]): { flags: Record<string, string | boolean>; p
   return { flags, positionals };
 }
 
+function assertNoPositionals(command: string, positionals: string[], zh = false): void {
+  if (positionals.length === 0) return;
+
+  const value = positionals.join(' ');
+  const rangeHint = positionals.includes('range') || positionals.some(arg => /^-\d+[dm]$/.test(arg));
+  if (zh) {
+    throw new Error(rangeHint
+      ? `${command} 不支持位置参数: ${value}\n时间范围请使用 --range 1m，例如: aiusage ${command} --range 1m`
+      : `${command} 不支持位置参数: ${value}`);
+  }
+
+  throw new Error(rangeHint
+    ? `${command} does not accept positional arguments: ${value}\nUse --range 1m, for example: aiusage ${command} --range 1m`
+    : `${command} does not accept positional arguments: ${value}`);
+}
+
 function localDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -754,6 +1066,9 @@ function resolveDateParams(flags: Record<string, string | boolean>, config: { lo
   const fromDate = typeof flags.from === 'string' ? flags.from : typeof flags.start === 'string' ? flags.start : undefined;
   const toDate = typeof flags.to === 'string' ? flags.to : typeof flags.end === 'string' ? flags.end : undefined;
 
+  if (toDate && !fromDate) {
+    throw new Error('--to 需要搭配 --from 使用');
+  }
   if (requestedDate) {
     return { dates: [requestedDate], range: 'today' };
   }
@@ -771,6 +1086,7 @@ function resolveDateParams(flags: Record<string, string | boolean>, config: { lo
     if (range === '7d') return { dates: [...getClosedDates(6), getTodayDate()], range };
     if (range === '1m') return { dates: [...getClosedDates(29), getTodayDate()], range };
     if (range === '3m') return { dates: [...getClosedDates(89), getTodayDate()], range };
+    if (range === '6m') return { dates: [...getClosedDates(179), getTodayDate()], range };
     return { range };
   }
   // --lookback
@@ -785,6 +1101,27 @@ function resolveDateParams(flags: Record<string, string | boolean>, config: { lo
   const dates = getClosedDates(lookbackDays);
   dates.push(getTodayDate());
   return { dates, range: '7d' };
+}
+
+function resolveScanDates(flags: Record<string, string | boolean>, config: { lookbackDays?: number }): string[] {
+  if (!hasDateSelection(flags)) return [getYesterdayDate()];
+
+  const { dates } = resolveDateParams(flags, config);
+  if (!dates) {
+    throw new Error('scan --range all 需要明确日期范围，请改用 --from YYYY-MM-DD --to YYYY-MM-DD');
+  }
+  return dates;
+}
+
+function hasDateSelection(flags: Record<string, string | boolean>): boolean {
+  return typeof flags.date === 'string'
+    || flags.today === true
+    || typeof flags.from === 'string'
+    || typeof flags.start === 'string'
+    || typeof flags.to === 'string'
+    || typeof flags.end === 'string'
+    || typeof flags.range === 'string'
+    || typeof flags.lookback === 'string';
 }
 
 function resolveGlobalLang(flags: Record<string, string | boolean>, config: { lang?: string }): 'en' | 'zh' {

@@ -26,6 +26,8 @@ export const PROVIDER_COLORS: Record<string, string> = {
   alibaba: '#cbd5e1',
   droid: '#e2e8f0',
   opencode: '#f1f5f9',
+  trae: '#7c3aed',
+  zhipu: '#2563eb',
 };
 
 export const PROVIDER_LABELS: Record<string, string> = {
@@ -34,10 +36,12 @@ export const PROVIDER_LABELS: Record<string, string> = {
   google: 'Google',
   github: 'GitHub',
   sourcegraph: 'Sourcegraph',
-  moonshot: 'Moonshot',
+  moonshot: 'Kimi / Moonshot',
   alibaba: 'Alibaba',
   droid: 'Droid',
   opencode: 'OpenCode',
+  trae: 'Trae',
+  zhipu: 'Zhipu AI',
 };
 
 export function providerLabel(id: string): string {
@@ -65,6 +69,12 @@ export function getTokenColor(s: typeof TOKEN_SERIES[number], isDark: boolean) {
 }
 
 export function formatProductLabel(raw: string): string {
+  const labels: Record<string, string> = {
+    trae: 'Trae (All)',
+    'trae-cn': 'Trae CN',
+    'trae-intl': 'Trae International',
+  };
+  if (labels[raw]) return labels[raw];
   return raw
     .split('-')
     .map((w) => (w === 'cli' ? 'CLI' : w.charAt(0).toUpperCase() + w.slice(1)))

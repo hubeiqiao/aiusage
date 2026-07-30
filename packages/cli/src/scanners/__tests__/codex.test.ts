@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { PRICING_VERSION } from '@aiusage/shared';
 import { scanCodex } from '../codex.js';
 
 // Helper to write a JSONL session file
@@ -124,6 +125,105 @@ describe('Fix 1: non-cached input cost formula', () => {
   });
 });
 
+describe('Codex tiered pricing', () => {
+  it('accumulates mixed short and long requests at their individual tiers', async () => {
+    const day = '2026-07-10';
+    const sessionDir = join(tmpDir, 'sessions', '2026', '07', '10');
+    const lines = [
+      ...tokenCountEvent(
+        `${day}T10:00:00.000Z`,
+        { input: 100_000, cached: 0, output: 10_000 },
+        { input: 100_000, cached: 0, output: 10_000 },
+        'gpt-5.6-sol',
+      ),
+      ...tokenCountEvent(
+        `${day}T10:05:00.000Z`,
+        { input: 400_000, cached: 0, output: 10_000 },
+        { input: 500_000, cached: 0, output: 20_000 },
+        'gpt-5.6-sol',
+      ),
+    ];
+    await writeSession(sessionDir, 'rollout-test.jsonl', lines);
+
+    const [result] = await scanCodex(day, tmpDir);
+    expect(result.eventCount).toBe(2);
+    expect(result.inputTokens).toBe(500_000);
+    expect(result.outputTokens).toBe(20_000);
+    expect(result.costUSD).toBeCloseTo(5.25, 4);
+    expect(result.pricingVersion).toBe(PRICING_VERSION);
+  });
+});
+
+describe('Codex service tier', () => {
+  it('adds priority suffix for GPT-5.6 Codex usage', async () => {
+    const day = '2026-07-10';
+    await writeFile(join(tmpDir, 'config.toml'), 'service_tier = "priority"\n');
+    const sessionDir = join(tmpDir, 'sessions', '2026', '07', '10');
+    const events = tokenCountEvent(
+      `${day}T10:00:00.000Z`,
+      { input: 10000, cached: 8000, output: 500 },
+      { input: 10000, cached: 8000, output: 500 },
+      'gpt-5.6-sol',
+    );
+    await writeSession(sessionDir, 'rollout-test.jsonl', events);
+
+    const results = await scanCodex(day, tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].model).toBe('gpt-5.6-sol-priority');
+  });
+
+  it('does not add fast suffix to GPT-5.6 while Codex Fast is unsupported', async () => {
+    const day = '2026-07-10';
+    await writeFile(join(tmpDir, 'config.toml'), 'service_tier = "fast"\n');
+    const sessionDir = join(tmpDir, 'sessions', '2026', '07', '10');
+    const events = tokenCountEvent(
+      `${day}T10:00:00.000Z`,
+      { input: 10000, cached: 8000, output: 500 },
+      { input: 10000, cached: 8000, output: 500 },
+      'gpt-5.6-sol',
+    );
+    await writeSession(sessionDir, 'rollout-test.jsonl', events);
+
+    const results = await scanCodex(day, tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].model).toBe('gpt-5.6-sol');
+  });
+
+  it('adds priority suffix for supported GPT-5.5 Codex usage', async () => {
+    const day = '2026-06-22';
+    await writeFile(join(tmpDir, 'config.toml'), 'service_tier = "priority"\n');
+    const sessionDir = join(tmpDir, 'sessions', '2026', '06', '22');
+    const events = tokenCountEvent(
+      `${day}T10:00:00.000Z`,
+      { input: 10000, cached: 8000, output: 500 },
+      { input: 10000, cached: 8000, output: 500 },
+      'gpt-5.5',
+    );
+    await writeSession(sessionDir, 'rollout-test.jsonl', events);
+
+    const results = await scanCodex(day, tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].model).toBe('gpt-5.5-priority');
+  });
+
+  it('does not add service tier suffix to unsupported Codex models', async () => {
+    const day = '2026-06-22';
+    await writeFile(join(tmpDir, 'config.toml'), 'service_tier = "priority"\n');
+    const sessionDir = join(tmpDir, 'sessions', '2026', '06', '22');
+    const events = tokenCountEvent(
+      `${day}T10:00:00.000Z`,
+      { input: 10000, cached: 8000, output: 500 },
+      { input: 10000, cached: 8000, output: 500 },
+      'codex-auto-review',
+    );
+    await writeSession(sessionDir, 'rollout-test.jsonl', events);
+
+    const results = await scanCodex(day, tmpDir);
+    expect(results).toHaveLength(1);
+    expect(results[0].model).toBe('codex-auto-review');
+  });
+});
+
 // ─── Fix 2: deduplicate events with identical total_token_usage ───
 
 describe('Fix 2: deduplication of duplicate events', () => {
@@ -215,6 +315,171 @@ describe('Fix 2: deduplication of duplicate events', () => {
     expect(results[0].inputTokens).toBe(2000);     // (3000-2000) + (4000-3000)
     expect(results[0].cachedInputTokens).toBe(5000); // 2000 + 3000
     expect(results[0].outputTokens).toBe(250);       // 100 + 150
+  });
+
+  it('does not drop real turns across sessions that each start with a zero total', async () => {
+    const day = '2025-10-16';
+    const dir = join(tmpDir, 'sessions', '2025', '10', '16');
+    // 两个独立会话，开头都带一个全零 total（会话开头噪声）。
+    // 旧逻辑下第二个会话的全零会命中第一个的签名而被丢弃，进而连累后续 delta 计算；
+    // 修复后全零不参与去重，两个会话的真实 turn 都应保留。
+    const zeroEvent = (ts: string) => ({
+      type: 'event_msg',
+      timestamp: ts,
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 },
+          total_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 },
+        },
+      },
+    });
+    const realEvent = (ts: string, out: number) => ({
+      type: 'event_msg',
+      timestamp: ts,
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: out },
+          total_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: out },
+        },
+      },
+    });
+    const ctx = { type: 'turn_context', payload: { model: 'gpt-5-codex', cwd: '/p' } };
+    await writeSession(dir, 'session-a.jsonl', [
+      { ...ctx, timestamp: `${day}T10:00:00.000Z` },
+      zeroEvent(`${day}T10:00:00.500Z`),
+      realEvent(`${day}T10:00:05.000Z`, 80),
+    ]);
+    await writeSession(dir, 'session-b.jsonl', [
+      { ...ctx, timestamp: `${day}T11:00:00.000Z` },
+      zeroEvent(`${day}T11:00:00.500Z`),
+      realEvent(`${day}T11:00:05.000Z`, 120),
+    ]);
+
+    const results = await scanCodex(day, tmpDir);
+    expect(results[0].eventCount).toBe(2); // 两个会话各 1 笔真实 turn，全零不计
+    expect(results[0].outputTokens).toBe(200); // 80 + 120
+  });
+
+  it('不会因两个独立 session 的累计 token 完全相同而误杀其中一个', async () => {
+    const day = '2025-10-16';
+    const dir = join(tmpDir, 'sessions', '2025', '10', '16');
+    for (const id of ['session-a', 'session-b']) {
+      await writeSession(dir, `${id}.jsonl`, [
+        { type: 'session_meta', payload: { id, cwd: '/same-project' } },
+        { type: 'turn_context', payload: { model: 'gpt-5-codex', cwd: '/same-project' } },
+        {
+          type: 'event_msg', timestamp: `${day}T10:00:00.000Z`,
+          payload: { type: 'token_count', info: {
+            total_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 10 },
+            last_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 10 },
+          } },
+        },
+      ]);
+    }
+
+    const results = await scanCodex(day, tmpDir);
+    expect(results[0]).toEqual(expect.objectContaining({
+      eventCount: 2, inputTokens: 100, cachedInputTokens: 100, outputTokens: 20,
+    }));
+  });
+
+  it('同一 session 在活动目录和归档目录各一份时仍只统计一次', async () => {
+    const day = '2025-10-16';
+    const lines = [
+      { type: 'session_meta', payload: { id: 'same-session', cwd: '/same-project' } },
+      { type: 'turn_context', payload: { model: 'gpt-5-codex', cwd: '/same-project' } },
+      {
+        type: 'event_msg', timestamp: `${day}T10:00:00.000Z`,
+        payload: { type: 'token_count', info: {
+          total_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 10 },
+          last_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 10 },
+        } },
+      },
+    ];
+    await writeSession(join(tmpDir, 'sessions', '2025', '10', '16'), 'active.jsonl', lines);
+    const archivedLines = lines.map((line) => JSON.parse(
+      JSON.stringify(line).replaceAll('/same-project', '/stale-archived-project'),
+    ));
+    await writeSession(join(tmpDir, 'archived_sessions', 'nested'), 'archived.jsonl', archivedLines);
+
+    const results = await scanCodex(day, tmpDir);
+    expect(results[0]).toEqual(expect.objectContaining({
+      project: '/same-project', eventCount: 1, outputTokens: 10,
+    }));
+  });
+
+  it('session_meta 的初始 workspace 优先于后续 turn_context cwd', async () => {
+    const day = '2025-10-16';
+    await writeSession(join(tmpDir, 'sessions', '2025', '10', '16'), 'workspace.jsonl', [
+      { type: 'session_meta', payload: { id: 'workspace-session', cwd: '/origin-project' } },
+      { type: 'turn_context', payload: { model: 'gpt-5-codex', cwd: '/later-cwd' } },
+      {
+        type: 'event_msg', timestamp: `${day}T10:00:00.000Z`,
+        payload: { type: 'token_count', info: {
+          total_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 10 },
+          last_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 10 },
+        } },
+      },
+    ]);
+
+    const results = await scanCodex(day, tmpDir);
+    expect(results[0]).toEqual(expect.objectContaining({ project: '/origin-project' }));
+  });
+
+  it('子会话跳过复制的父历史，只统计超过继承基线的自身 turn', async () => {
+    const day = '2025-10-16';
+    const dir = join(tmpDir, 'sessions', '2025', '10', '16');
+    const parentId = '019e5b00-0000-7000-8000-000000000001';
+    const childId = '019e5c03-0000-7000-8000-000000000001';
+    await writeSession(dir, 'child.jsonl', [
+      {
+        type: 'session_meta',
+        payload: {
+          id: childId,
+          forked_from_id: parentId,
+          source: { subagent: { thread_spawn: { parent_thread_id: parentId } } },
+          cwd: '/child-project',
+        },
+      },
+      { type: 'session_meta', payload: { id: parentId, cwd: '/parent-project' } },
+      { type: 'turn_context', payload: { turn_id: parentId, model: 'gpt-5-codex', cwd: '/parent-project' } },
+      {
+        type: 'event_msg', timestamp: `${day}T10:00:00.000Z`,
+        payload: { type: 'token_count', info: {
+          total_token_usage: { input_tokens: 300, cached_input_tokens: 200, output_tokens: 30, total_tokens: 330 },
+          last_token_usage: { input_tokens: 300, cached_input_tokens: 200, output_tokens: 30, total_tokens: 330 },
+        } },
+      },
+      {
+        type: 'event_msg', timestamp: `${day}T10:00:00.500Z`,
+        payload: { type: 'task_started', turn_id: childId },
+      },
+      { type: 'turn_context', payload: { turn_id: childId, model: 'gpt-5-codex' } },
+      {
+        type: 'event_msg', timestamp: `${day}T10:00:01.000Z`,
+        payload: { type: 'token_count', info: {
+          total_token_usage: { input_tokens: 300, cached_input_tokens: 200, output_tokens: 30, total_tokens: 330 },
+          last_token_usage: { input_tokens: 250, cached_input_tokens: 180, output_tokens: 25, total_tokens: 275 },
+        } },
+      },
+      {
+        type: 'event_msg', timestamp: `${day}T10:00:02.000Z`,
+        payload: { type: 'token_count', info: {
+          total_token_usage: { input_tokens: 320, cached_input_tokens: 210, output_tokens: 32, total_tokens: 352 },
+          last_token_usage: { input_tokens: 20, cached_input_tokens: 10, output_tokens: 2, total_tokens: 22 },
+        } },
+      },
+    ]);
+
+    const results = await scanCodex(day, tmpDir);
+    expect(results).toEqual([
+      expect.objectContaining({
+        project: '/child-project', eventCount: 1, inputTokens: 10,
+        cachedInputTokens: 10, outputTokens: 2,
+      }),
+    ]);
   });
 });
 
@@ -493,6 +758,9 @@ describe('ninerouter routed models', () => {
     expect(results[0].product).toBe('codex');
     expect(results[0].model).toBe('claude-opus-4-8');
     expect(results[0].inputTokens).toBe(1000);
+    // 目录里没有 anthropic/codex，必须按 anthropic/claude-code 预算成本，
+    // 否则这些事件会以 costUSD 缺失的形式落地，本地报告显示 $0。
+    expect(results[0].costUSD).toBeGreaterThan(0);
   });
 
   it('keeps native OpenAI codex models under openai/codex', async () => {

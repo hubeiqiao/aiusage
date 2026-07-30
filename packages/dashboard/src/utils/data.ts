@@ -1,13 +1,16 @@
 import type { SankeyGraph } from '@aiusage/shared';
 import type { OverviewPayload, FiltersState } from '../hooks/use-overview';
-import { arrSum } from './format';
 
 /** Get all YYYY-MM-DD dates for the current month (1st to last day). */
 export function currentMonthDates(): string[] {
+  // Worker 用 UTC 选择「本月」（buildDateWindow 走 startOfUtcDay），
+  // 这里若用浏览器本地年月，在月末跨时区的那几个小时会对不上：
+  // 例如加州 7/31 时 UTC 已是 8/1，接口返回 8 月而这里只留 7 月的 key，
+  // 「本月」视图会整片归零。
   const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const last = new Date(y, m + 1, 0).getDate();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
   const result: string[] = [];
   for (let d = 1; d <= last; d++) {
     result.push(`${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
@@ -28,9 +31,12 @@ export function padMonth(ov: OverviewPayload): OverviewPayload {
     outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0,
   });
 
-  const monthTrend = dailyTrend.filter((d) => d.estimatedCostUsd > 0);
-  const totalCostUsd = arrSum(monthTrend.map((d) => d.estimatedCostUsd));
-  const totalEvents = arrSum(monthTrend.map((d) => d.eventCount));
+  // 「有数据的一天」按事件数或费用判断，而不是只看 estimatedCostUsd > 0：
+  // 未配置单价的模型（例如 Opus 5 上线到目录补齐之前）会产生零成本但有事件的
+  // 真实用量，只按费用过滤会让这些用量从 totalEvents / activeDays 里消失。
+  const monthTrend = dailyTrend.filter((d) => Number(d.eventCount || 0) > 0 || Number(d.estimatedCostUsd || 0) > 0);
+  const totalCostUsd = monthTrend.reduce((sum, d) => sum + Number(d.estimatedCostUsd || 0), 0);
+  const totalEvents = monthTrend.reduce((sum, d) => sum + Number(d.eventCount || 0), 0);
   const activeDays = monthTrend.length;
 
   // Scale share/sankey data by cost ratio (month vs full range)
@@ -81,10 +87,21 @@ export function padMonth(ov: OverviewPayload): OverviewPayload {
 
 export function buildQuery(f: FiltersState): string {
   const p = new URLSearchParams();
+  const aliases: Record<string, string> = {
+    deviceIds: 'deviceId',
+    products: 'product',
+    models: 'model',
+    projects: 'project',
+  };
+
   for (const [k, v] of Object.entries(f)) {
+    if (Array.isArray(v)) {
+      const key = aliases[k] ?? k;
+      v.filter(Boolean).forEach((item) => p.append(key, item));
+      continue;
+    }
     if (!v) continue;
-    // "month" is frontend-only; request 30d from API
-    p.set(k, k === 'range' && v === 'month' ? '30d' : v);
+    p.set(k, v);
   }
   return p.toString();
 }

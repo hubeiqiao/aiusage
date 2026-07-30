@@ -1,7 +1,7 @@
 import type { IngestActivityItem, IngestPayload, CostStatus } from '@aiusage/shared';
 import { jsonOk, jsonError } from '../utils/response.js';
 import { verifyDeviceToken } from '../utils/token.js';
-import { calculateCost, getWorstCostStatus } from '../utils/pricing.js';
+import { calculateIngestBreakdownCost, getWorstCostStatus } from '../utils/pricing.js';
 import type { Env } from '../types.js';
 
 export async function handleIngest(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
@@ -39,8 +39,6 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
   for (const day of body.days) {
     const costStatuses: CostStatus[] = [];
     const breakdownsWithCost = [];
-    const projectCosts = new Map<string, number>();
-    const modelCosts = new Map<string, number>();
     let dayTotalCost = 0;
     let dayTotalEvents = 0;
     let dayTotalInput = 0;
@@ -53,23 +51,7 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
     for (const b of day.breakdowns) {
       const cacheWrite5mTokens = b.cacheWrite5mTokens ?? b.cacheWriteTokens;
       const cacheWrite1hTokens = b.cacheWrite1hTokens ?? 0;
-      // 优先使用 CLI 预算的费用（如 Kiro 积分计费、Codex JSONL 自带 costUSD），
-      // 这类来源本地无 token 数据，服务端按 token 计费会得到 0。
-      const cost =
-        typeof b.costUSD === 'number' && b.costUSD > 0
-          ? {
-              estimatedCostUsd: Math.round(b.costUSD * 10000) / 10000,
-              costStatus: 'estimated' as CostStatus,
-              pricingVersion: 'client-supplied',
-            }
-          : calculateCost(b.provider, b.product, b.model, {
-              inputTokens: b.inputTokens,
-              cachedInputTokens: b.cachedInputTokens,
-              cacheWriteTokens: b.cacheWriteTokens,
-              cacheWrite5mTokens,
-              cacheWrite1hTokens,
-              outputTokens: b.outputTokens,
-            });
+      const cost = calculateIngestBreakdownCost(b);
 
       costStatuses.push(cost.costStatus);
       dayTotalCost += cost.estimatedCostUsd;
@@ -79,33 +61,15 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
       dayTotalCacheWrite += b.cacheWriteTokens;
       dayTotalOutput += b.outputTokens;
       dayTotalReasoning += b.reasoningOutputTokens;
-
-      const rawProject = b.project || 'unknown';
-      const isFullPath = rawProject.startsWith('/') || /^[A-Z]:\\/i.test(rawProject);
-      const projectDisplay = b.projectDisplay ?? (isFullPath ? rawProject.split('/').filter(Boolean).pop() || 'unknown' : rawProject);
-      const projectAlias = b.projectAlias ?? null;
-      const model = b.model || 'unknown';
-      const projectKey = projectAlias ?? projectDisplay;
-
-      projectCosts.set(projectKey, (projectCosts.get(projectKey) ?? 0) + cost.estimatedCostUsd);
-      modelCosts.set(model, (modelCosts.get(model) ?? 0) + cost.estimatedCostUsd);
-      breakdownsWithCost.push({
-        breakdown: b,
-        cost,
-        cacheWrite5mTokens,
-        cacheWrite1hTokens,
-        rawProject,
-        projectDisplay,
-        projectAlias,
-        model,
-      });
+      breakdownsWithCost.push({ breakdown: b, cost, cacheWrite5mTokens, cacheWrite1hTokens });
     }
 
     const dayCostStatus = getWorstCostStatus(costStatuses);
-    const topProject = topCostEntry(projectCosts);
-    const topModel = topCostEntry(modelCosts);
 
-    const statements = [
+    // 父记录 upsert + 整日清理 + breakdown 重建必须原子提交。
+    // 如果分开执行，中途任何一步失败（例如 D1 瞬时错误）都会让这一天只剩
+    // 被删空或半重建的数据；打包成一个 batch 可保证失败时保留原快照。
+    const statements: D1PreparedStatement[] = [
       // 先写入父记录，避免 breakdown 外键约束失败
       env.DB.prepare(`
       INSERT INTO daily_usage
@@ -133,23 +97,32 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
         updated_at = excluded.updated_at
     `)
         .bind(
-        tokenPayload.deviceId, day.usageDate,
-        dayTotalEvents, dayTotalInput, dayTotalCachedInput, dayTotalCacheWrite,
-        dayTotalOutput, dayTotalReasoning,
-        Math.round(dayTotalCost * 10000) / 10000, dayCostStatus, 'current',
-        topProject.key, topProject.cost,
-        topModel.key, topModel.cost,
-        now, now,
+          tokenPayload.deviceId, day.usageDate,
+          dayTotalEvents, dayTotalInput, dayTotalCachedInput, dayTotalCacheWrite,
+          dayTotalOutput, dayTotalReasoning,
+          Math.round(dayTotalCost * 10000) / 10000, dayCostStatus, 'current',
+          'pending', 0,
+          'pending', 0,
+          now, now,
         ),
 
-      env.DB.prepare(`
-      DELETE FROM daily_usage_breakdown
-      WHERE device_id = ? AND usage_date = ?
-    `)
+      // 重传某一天时，先清掉该设备当天的所有 breakdown 行，再按 payload 重建。
+      // CLI 每次都会扫描当天全部工具并整体上传，因此这是「以本次上传为准」的语义：
+      //  - 纠正后的数据会覆盖旧值；
+      //  - 已经不存在的行（改名、误算、当天清空）会被真正删除，不会残留虚高统计。
+      // 这同时涵盖了 CLI 1.7.5 把 trae-cn / trae-intl 混存为 `trae` 的历史脏数据。
+      env.DB.prepare(
+        'DELETE FROM daily_usage_breakdown WHERE device_id = ? AND usage_date = ?',
+      )
         .bind(tokenPayload.deviceId, day.usageDate),
     ];
 
-    for (const { breakdown: b, cost, cacheWrite5mTokens, cacheWrite1hTokens, rawProject, projectDisplay, projectAlias, model } of breakdownsWithCost) {
+    for (const { breakdown: b, cost, cacheWrite5mTokens, cacheWrite1hTokens } of breakdownsWithCost) {
+      const rawProject = b.project || 'unknown';
+      const isFullPath = rawProject.startsWith('/') || /^[A-Z]:\\/i.test(rawProject);
+      const projectDisplay = b.projectDisplay ?? (isFullPath ? rawProject.split('/').filter(Boolean).pop() || 'unknown' : rawProject);
+      const projectAlias = b.projectAlias ?? null;
+
       statements.push(env.DB.prepare(`
         INSERT INTO daily_usage_breakdown
           (device_id, usage_date, provider, product, channel, model, project,
@@ -177,7 +150,7 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
       `)
         .bind(
           tokenPayload.deviceId, day.usageDate,
-          b.provider, b.product, b.channel, model, rawProject,
+          b.provider, b.product, b.channel, b.model || 'unknown', rawProject,
           projectDisplay, projectAlias,
           b.eventCount, b.sessionCount ?? 0, b.inputTokens, b.cachedInputTokens, b.cacheWriteTokens,
           b.outputTokens, b.reasoningOutputTokens,
@@ -191,7 +164,40 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
     }
 
     await env.DB.batch(statements);
+
     await replaceActivityMetrics(env, tokenPayload.deviceId, day.usageDate, day.activity?.items ?? [], now);
+
+    // 计算 top project / model 并回填 daily_usage
+    const topProject = await env.DB.prepare(`
+      SELECT COALESCE(project_alias, project_display) as project, SUM(estimated_cost_usd) as total_cost
+      FROM daily_usage_breakdown
+      WHERE device_id = ? AND usage_date = ?
+      GROUP BY COALESCE(project_alias, project_display) ORDER BY total_cost DESC LIMIT 1
+    `).bind(tokenPayload.deviceId, day.usageDate)
+      .first<{ project: string; total_cost: number }>();
+
+    const topModel = await env.DB.prepare(`
+      SELECT model, SUM(estimated_cost_usd) as total_cost
+      FROM daily_usage_breakdown
+      WHERE device_id = ? AND usage_date = ?
+      GROUP BY model ORDER BY total_cost DESC LIMIT 1
+    `).bind(tokenPayload.deviceId, day.usageDate)
+      .first<{ model: string; total_cost: number }>();
+
+    await env.DB.prepare(`
+      UPDATE daily_usage
+      SET top_project_by_cost = ?, top_project_cost_usd = ?,
+          top_model_by_cost = ?, top_model_cost_usd = ?,
+          updated_at = ?
+      WHERE device_id = ? AND usage_date = ?
+    `)
+      .bind(
+        topProject?.project ?? 'unknown', topProject?.total_cost ?? 0,
+        topModel?.model ?? 'unknown', topModel?.total_cost ?? 0,
+        now,
+        tokenPayload.deviceId, day.usageDate,
+      )
+      .run();
 
     costSummary[day.usageDate] = {
       estimatedCostUsd: Math.round(dayTotalCost * 10000) / 10000,
@@ -199,17 +205,14 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
     };
   }
 
-  // 更新 last_seen_at + 别名（sync 时自动同步本地别名）。这不是用量写入的关键路径，
-  // 所以作为后台 best-effort 任务，避免 D1 暂时抖动让已写成功的上传返回 500。
+  // 更新 last_seen_at + 别名（sync 时自动同步本地别名）
   const deviceTouch = env.DB.prepare(
     'UPDATE devices SET last_seen_at = ?, app_version = ?, public_label = COALESCE(?, public_label) WHERE device_id = ?',
   )
     .bind(now, body.device.appVersion, body.device.deviceAlias ?? null, tokenPayload.deviceId)
-    .run()
-    .catch(err => {
-      console.warn('Failed to update device last_seen_at after ingest', err);
-    });
+    .run();
 
+  // 有 ExecutionContext 时不阻塞响应，让设备心跳在后台完成。
   if (ctx) {
     ctx.waitUntil(deviceTouch);
   } else {
@@ -217,20 +220,6 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
   }
 
   return jsonOk({ daysProcessed: body.days.length, costSummary });
-}
-
-function topCostEntry(costs: Map<string, number>): { key: string; cost: number } {
-  let topKey = 'unknown';
-  let topCost = 0;
-
-  for (const [key, cost] of costs.entries()) {
-    if (cost > topCost) {
-      topKey = key;
-      topCost = cost;
-    }
-  }
-
-  return { key: topKey, cost: Math.round(topCost * 10000) / 10000 };
 }
 
 async function replaceActivityMetrics(

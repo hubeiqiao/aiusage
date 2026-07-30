@@ -1,10 +1,20 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { IngestBreakdown } from '@aiusage/shared';
+import { calculateCost, PRICING_VERSION, type PricingCatalog } from '@aiusage/shared';
 import { scanDates } from './scan.js';
+import { parseTs, dateKey, fileModifiedTs } from './scanners/utils.js';
+import { resolveKimiCodeHome } from './scanners/kimi.js';
+import {
+  resolveTokscaleTraeCacheDir,
+  resolveTraeIntlCacheDir,
+  resolveTraeNativeCacheDir,
+} from './scanners/trae.js';
+import { discoverOpenCodeUsageDates } from './scanners/opencode.js';
+import type { PricingInfo } from './pricing.js';
 
-export type ReportRange = '7d' | '1m' | '3m' | 'all' | 'today';
+export type ReportRange = '7d' | '1m' | '3m' | '6m' | 'all' | 'today';
 
 interface Totals {
   eventCount: number;
@@ -41,13 +51,19 @@ export interface LocalReport {
   daily: DailySummary[];
   bySource: SourceSummary[];
   byModel: ModelSummary[];
+  pricing: PricingInfo;
   pricingWarnings: string[];
+  tools?: string[];
 }
 
 interface BuildReportOptions {
   projectAliases?: Record<string, string>;
+  opencodeDbPaths?: readonly string[];
   /** 直接传入日期列表时忽略 range 参数 */
   dates?: string[];
+  tools?: readonly string[];
+  pricingCatalog?: PricingCatalog;
+  pricingInfo?: PricingInfo;
 }
 
 export async function buildLocalReport(
@@ -57,9 +73,9 @@ export async function buildLocalReport(
   const requestedDates = options.dates
     ? options.dates
     : range === 'all'
-    ? await discoverAllDates()
+    ? await discoverAllDates(options.tools, options.opencodeDbPaths)
     : range === 'today'
-    ? [toDateKey(getTodayLocalDate())]
+    ? [dateKey(getTodayLocalDate())]
     : buildPresetDates(range);
 
   const daily: DailySummary[] = [];
@@ -69,7 +85,11 @@ export async function buildLocalReport(
   const pricingWarnings = new Set<string>();
   let daysWithData = 0;
 
-  const results = await scanDates(requestedDates, { projectAliases: options.projectAliases });
+  const results = await scanDates(requestedDates, {
+    projectAliases: options.projectAliases,
+    opencodeDbPaths: options.opencodeDbPaths,
+    tools: options.tools,
+  });
 
   for (const result of results) {
     const usageDate = result.usageDate;
@@ -80,7 +100,7 @@ export async function buildLocalReport(
       daysWithData += 1;
 
       for (const breakdown of result.breakdowns) {
-        const breakdownTotals = toBreakdownTotals(breakdown, pricingWarnings);
+        const breakdownTotals = toBreakdownTotals(breakdown, pricingWarnings, options.pricingCatalog);
         dayTotals.estimatedCostUsd += breakdownTotals.estimatedCostUsd;
         mergeTotals(totals, breakdownTotals);
         mergeTotals(getOrCreate(bySource, `${breakdown.provider}/${breakdown.product}`), breakdownTotals);
@@ -115,15 +135,20 @@ export async function buildLocalReport(
         return { source, model, ...summary };
       })
       .sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd || b.totalTokens - a.totalTokens),
+    pricing: options.pricingInfo ?? {
+      source: 'bundled',
+      version: options.pricingCatalog?.version ?? 'bundled',
+    },
     pricingWarnings: [...pricingWarnings].sort(),
+    ...(options.tools ? { tools: [...options.tools] } : {}),
   };
 }
 
 export function parseReportRange(value: string | boolean | undefined, today?: boolean): ReportRange {
   if (today) return 'today';
   if (value === undefined || value === true) return '7d';
-  if (value === '7d' || value === '1m' || value === '3m' || value === 'all' || value === 'today') return value;
-  throw new Error('--range 仅支持 7d、1m、3m、all、today');
+  if (value === '7d' || value === '1m' || value === '3m' || value === '6m' || value === 'all' || value === 'today') return value;
+  throw new Error('--range 仅支持 7d、1m、3m、6m、all、today');
 }
 
 function getRangeLabel(range: ReportRange): string {
@@ -134,6 +159,8 @@ function getRangeLabel(range: ReportRange): string {
       return '最近 30 天';
     case '3m':
       return '最近 90 天';
+    case '6m':
+      return '最近 180 天';
     case 'all':
       return '全部历史';
     case 'today':
@@ -142,37 +169,63 @@ function getRangeLabel(range: ReportRange): string {
 }
 
 function buildPresetDates(range: Exclude<ReportRange, 'all' | 'today'>): string[] {
-  const days = range === '7d' ? 7 : range === '1m' ? 30 : 90;
+  const days = range === '7d' ? 7 : range === '1m' ? 30 : range === '3m' ? 90 : 180;
   const today = getTodayLocalDate();
   const result: string[] = [];
 
   for (let offset = days - 1; offset >= 0; offset -= 1) {
     const day = new Date(today);
     day.setDate(today.getDate() - offset);
-    result.push(toDateKey(day));
+    result.push(dateKey(day));
   }
 
   return result;
 }
 
-async function discoverAllDates(): Promise<string[]> {
+async function discoverAllDates(
+  tools?: readonly string[],
+  opencodeDbPaths?: readonly string[],
+): Promise<string[]> {
   const dates = new Set<string>();
   const home = homedir();
-  await Promise.all([
-    discoverClaudeDates(dates),
-    discoverCodexDates(dates),
-    discoverGeminiDates(dates),
-    discoverCopilotVscodeDates(dates),
-    discoverAntigravityDates(dates),
-    discoverGenericJsonlDates(join(home, '.copilot', 'session-state'), dates),
-    discoverGenericJsonlDates(join(home, '.qwen', 'tmp'), dates),
-    discoverGenericJsonlDates(join(home, '.kimi', 'sessions'), dates),
-    discoverGenericJsonDates(join(home, '.local', 'share', 'amp', 'threads'), dates),
-    discoverGenericJsonlDates(join(home, '.factory', 'sessions'), dates),
-    discoverGenericJsonDates(join(home, '.local', 'share', 'opencode'), dates),
-    discoverGenericJsonlDates(join(home, '.pi', 'agent', 'sessions'), dates),
-    discoverKiroDates(dates),
-  ]);
+  const selected = tools ? new Set(tools) : null;
+  const includes = (...products: string[]) => !selected || products.some(product => selected.has(product));
+  const discoveries: Array<Promise<void>> = [];
+
+  if (includes('claude-code')) discoveries.push(discoverClaudeDates(dates));
+  if (includes('codex')) discoveries.push(discoverCodexDates(dates));
+  if (includes('gemini-cli')) discoveries.push(discoverGeminiDates(dates));
+  if (includes('copilot-vscode')) discoveries.push(discoverCopilotVscodeDates(dates));
+  if (includes('antigravity')) discoveries.push(discoverAntigravityDates(dates));
+  if (includes('copilot-cli')) {
+    discoveries.push(discoverGenericJsonlDates(join(home, '.copilot', 'session-state'), dates));
+    discoveries.push(discoverGenericJsonlDates(join(home, '.copilot', 'otel'), dates));
+  }
+  if (includes('qwen-code')) {
+    discoveries.push(discoverGenericJsonlDates(join(home, '.qwen', 'tmp'), dates));
+    discoveries.push(discoverGenericJsonlDates(join(home, '.qwen', 'projects'), dates));
+  }
+  if (includes('kimi-code')) {
+    discoveries.push(discoverGenericJsonlDates(join(home, '.kimi', 'sessions'), dates));
+    discoveries.push(discoverGenericJsonlDates(join(resolveKimiCodeHome(home), 'sessions'), dates));
+  }
+  if (includes('amp')) discoveries.push(discoverGenericJsonDates(join(home, '.local', 'share', 'amp', 'threads'), dates));
+  if (includes('droid')) discoveries.push(discoverGenericJsonDates(join(home, '.factory', 'sessions'), dates));
+  if (includes('opencode')) discoveries.push(discoverOpenCodeUsageDates({ dbPaths: opencodeDbPaths }).then(found => { found.forEach(date => dates.add(date)); }));
+  if (includes('pi')) {
+    discoveries.push(discoverGenericJsonlDates(join(home, '.pi', 'agent', 'sessions'), dates));
+    discoveries.push(discoverGenericJsonlDates(join(home, '.omp', 'agent', 'sessions'), dates));
+  }
+  if (includes('kiro')) discoveries.push(discoverKiroDates(dates));
+  if (includes('trae-cn', 'trae')) discoveries.push(discoverGenericJsonDates(resolveTraeNativeCacheDir(home), dates));
+  if (includes('trae-intl', 'trae')) {
+    discoveries.push(discoverGenericJsonDates(resolveTraeIntlCacheDir(home), dates));
+    discoveries.push(discoverGenericJsonDates(resolveTokscaleTraeCacheDir(home), dates));
+  }
+
+  await Promise.all(discoveries);
+  const explicitCopilotOtel = process.env.COPILOT_OTEL_FILE_EXPORTER_PATH?.trim();
+  if (explicitCopilotOtel && includes('copilot-cli')) await discoverJsonlFileDates(explicitCopilotOtel, dates);
   return [...dates].sort();
 }
 
@@ -183,14 +236,28 @@ async function discoverGenericJsonlDates(baseDir: string, dates: Set<string>): P
   for (const filePath of files) {
     const content = await safeReadUtf8(filePath);
     if (!content) continue;
+    let foundDate = false;
     for (const line of content.split('\n')) {
       if (!line.trim()) continue;
-      let record: { timestamp?: string | number };
+      let record: Record<string, any>;
       try { record = JSON.parse(line); } catch { continue; }
-      const ts = parseTimestamp(record.timestamp as string | undefined);
-      if (ts) dates.add(toDateKey(ts));
+      foundDate = collectRecordDates(record, dates) || foundDate;
     }
+    if (!foundDate) await addFileModifiedDate(filePath, dates);
   }
+}
+
+async function discoverJsonlFileDates(filePath: string, dates: Set<string>): Promise<void> {
+  const content = await safeReadUtf8(filePath);
+  if (!content) return;
+  let foundDate = false;
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      foundDate = collectRecordDates(JSON.parse(line) as Record<string, any>, dates) || foundDate;
+    } catch { /* skip */ }
+  }
+  if (!foundDate) await addFileModifiedDate(filePath, dates);
 }
 
 /** 通用：递归扫描 .json 文件，从顶层或 messages 提取 timestamp */
@@ -202,18 +269,65 @@ async function discoverGenericJsonDates(baseDir: string, dates: Set<string>): Pr
     if (!content) continue;
     let data: any;
     try { data = JSON.parse(content); } catch { continue; }
-    // 顶层 timestamp
-    const topTs = parseTimestamp(data.timestamp ?? data.createTime);
-    if (topTs) dates.add(toDateKey(topTs));
-    // messages 数组
-    const msgs = data.messages ?? data.history ?? [];
-    if (Array.isArray(msgs)) {
-      for (const msg of msgs) {
-        const ts = parseTimestamp(msg.timestamp ?? msg.createTime);
-        if (ts) dates.add(toDateKey(ts));
-      }
+    if (Array.isArray(data) && data.length === 0) continue;
+    const foundDate = Array.isArray(data)
+      ? data.reduce((found, row) => collectRecordDates(row, dates) || found, false)
+      : collectRecordDates(data, dates);
+    if (!foundDate) await addFileModifiedDate(filePath, dates);
+  }
+}
+
+function collectRecordDates(record: Record<string, any> | undefined, dates: Set<string>): boolean {
+  if (!record || typeof record !== 'object') return false;
+  let found = false;
+  const candidates = [
+    record.timestamp, record.time, record.created_at, record.createTime, record.startTime,
+    record.lastUpdated, record.created, record.providerLockTimestamp, record.endTime,
+    record.hrTime, record._hrTime, record.observedTimestamp, record.timeUnixNano,
+    record.usage_time,
+    record.time?.created,
+  ];
+  for (const value of candidates) {
+    const ts = parseStructuredTs(value);
+    if (ts) {
+      dates.add(dateKey(ts));
+      found = true;
     }
   }
+  const nestedRows = [
+    ...(Array.isArray(record.messages) ? record.messages : []),
+    ...(Array.isArray(record.history) ? record.history : []),
+    ...(Array.isArray(record.data?.messages) ? record.data.messages : []),
+    ...(Array.isArray(record.data?.history) ? record.data.history : []),
+    ...(Array.isArray(record.$set?.messages) ? record.$set.messages : []),
+    ...(Array.isArray(record.usageLedger?.events) ? record.usageLedger.events : []),
+    ...(Array.isArray(record.events) ? record.events : []),
+  ];
+  for (const row of nestedRows) found = collectRecordDates(row, dates) || found;
+  return found;
+}
+
+function parseStructuredTs(value: unknown): Date | null {
+  if (Array.isArray(value) && value.length > 0) {
+    const seconds = Number(value[0]);
+    const nanos = Number(value[1] ?? 0);
+    if (Number.isFinite(seconds) && Number.isFinite(nanos)) {
+      return parseTs(seconds * 1_000 + nanos / 1_000_000);
+    }
+  }
+  if (typeof value === 'number' || (typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value))) {
+    const raw = Number(value);
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    const abs = Math.abs(raw);
+    const millis = abs >= 1e17 ? raw / 1e6 : abs >= 1e14 ? raw / 1e3 : raw;
+    return parseTs(millis);
+  }
+  return parseTs(value as string | number | undefined);
+}
+
+async function addFileModifiedDate(filePath: string, dates: Set<string>): Promise<void> {
+  const timestamp = await fileModifiedTs(filePath);
+  if (timestamp) dates.add(dateKey(timestamp));
 }
 
 async function walkForFiles(dir: string, ext: string, result: string[]): Promise<void> {
@@ -231,64 +345,10 @@ async function walkForFiles(dir: string, ext: string, result: string[]): Promise
 
 async function discoverGeminiDates(dates: Set<string>): Promise<void> {
   const baseDir = join(homedir(), '.gemini', 'tmp');
-  const files: string[] = [];
-  await walkForGeminiJsonl(baseDir, files);
-
-  for (const filePath of files) {
-    const content = await safeReadUtf8(filePath);
-    if (!content) continue;
-
-    let session:
-      | { timestamp?: string | number; createTime?: string | number; startTime?: string | number; messages?: { timestamp?: string | number; createTime?: string | number }[]; history?: { timestamp?: string | number; createTime?: string | number }[]; data?: { createTime?: string | number; messages?: { timestamp?: string | number; createTime?: string | number }[]; history?: { timestamp?: string | number; createTime?: string | number }[] } }
-      | Array<{ timestamp?: string | number }>;
-    try {
-      session = JSON.parse(content);
-    } catch {
-      continue;
-    }
-
-    if (Array.isArray(session)) {
-      for (const row of session) {
-        const ts = parseTimestamp(row.timestamp);
-        if (ts) dates.add(toDateKey(ts));
-      }
-      continue;
-    }
-
-    const topLevelTs = parseTimestamp(session.timestamp ?? session.createTime ?? session.startTime ?? session.data?.createTime);
-    if (topLevelTs) dates.add(toDateKey(topLevelTs));
-
-    const messages = [
-      ...(session.messages ?? []),
-      ...(session.history ?? []),
-      ...(session.data?.messages ?? []),
-      ...(session.data?.history ?? []),
-    ];
-    for (const msg of messages) {
-      const ts = parseTimestamp(msg.timestamp ?? msg.createTime);
-      if (ts) {
-        dates.add(toDateKey(ts));
-      }
-    }
-  }
-}
-
-async function walkForGeminiJsonl(dir: string, result: string[]): Promise<void> {
-  let entries;
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      await walkForGeminiJsonl(fullPath, result);
-    } else if (entry.name.endsWith('.json')) {
-      result.push(fullPath);
-    }
-  }
+  await Promise.all([
+    discoverGenericJsonDates(baseDir, dates),
+    discoverGenericJsonlDates(baseDir, dates),
+  ]);
 }
 
 async function discoverCopilotVscodeDates(dates: Set<string>): Promise<void> {
@@ -301,15 +361,15 @@ async function discoverCopilotVscodeDates(dates: Set<string>): Promise<void> {
     if (!content) continue;
     for (const line of content.split('\n')) {
       if (!line.includes('ccreq:') || !line.includes('| success |')) continue;
-      const ts = parseTimestamp(line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)/)?.[1]?.replace(' ', 'T'));
-      if (ts) dates.add(toDateKey(ts));
+      const ts = parseTs(line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)/)?.[1]?.replace(' ', 'T'));
+      if (ts) dates.add(dateKey(ts));
     }
   }
 
   const sessionFiles: string[] = [];
   await walkForFiles(join(home, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage'), '.json', sessionFiles);
   for (const filePath of sessionFiles) {
-    if (!filePath.includes('/chatSessions/')) continue;
+    if (!isChatSessionFile(filePath)) continue;
     const content = await safeReadUtf8(filePath);
     if (!content) continue;
     let session: { requests?: Array<{ timestamp?: string | number; response?: unknown[]; result?: { errorDetails?: { responseIsIncomplete?: boolean } } }> };
@@ -321,10 +381,60 @@ async function discoverCopilotVscodeDates(dates: Set<string>): Promise<void> {
     for (const request of session.requests ?? []) {
       if ((request.response?.length ?? 0) === 0) continue;
       if (request.result?.errorDetails?.responseIsIncomplete) continue;
-      const ts = parseTimestamp(request.timestamp);
-      if (ts) dates.add(toDateKey(ts));
+      const ts = parseTs(request.timestamp);
+      if (ts) dates.add(dateKey(ts));
     }
   }
+
+  const crdtFiles: string[] = [];
+  await walkForFiles(
+    join(home, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage'),
+    '.jsonl',
+    crdtFiles,
+  );
+  for (const filePath of crdtFiles) {
+    if (!isChatSessionFile(filePath)) continue;
+    const content = await safeReadUtf8(filePath);
+    if (!content) continue;
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      let record: { kind?: number; k?: unknown[]; v?: unknown };
+      try {
+        record = JSON.parse(line) as { kind?: number; k?: unknown[]; v?: unknown };
+      } catch {
+        continue;
+      }
+      const root = record.v && typeof record.v === 'object' && !Array.isArray(record.v)
+        ? record.v as { requests?: unknown[] }
+        : undefined;
+      const requests = record.kind === 0 && Array.isArray(root?.requests)
+        ? root.requests
+        : record.kind === 2 && record.k?.[0] === 'requests' && Array.isArray(record.v)
+          ? record.v
+          : [];
+      for (const value of requests) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const request = value as {
+          timestamp?: string | number;
+          modelId?: string;
+          promptTokens?: number;
+          completionTokens?: number;
+          result?: { metadata?: { promptTokens?: number; outputTokens?: number; resolvedModel?: string } };
+        };
+        const metadata = request.result?.metadata;
+        const isCopilot = Boolean(metadata?.resolvedModel) || request.modelId?.startsWith('copilot/');
+        const hasTokens = (request.promptTokens ?? metadata?.promptTokens ?? 0) > 0
+          || (request.completionTokens ?? metadata?.outputTokens ?? 0) > 0;
+        if (!isCopilot || !hasTokens) continue;
+        const ts = parseTs(request.timestamp);
+        if (ts) dates.add(dateKey(ts));
+      }
+    }
+  }
+}
+
+function isChatSessionFile(filePath: string): boolean {
+  return basename(dirname(filePath)) === 'chatSessions';
 }
 
 async function discoverKiroDates(dates: Set<string>): Promise<void> {
@@ -346,16 +456,16 @@ async function discoverKiroDates(dates: Set<string>): Promise<void> {
       continue;
     }
 
-    const ts = parseTimestamp(
+    const ts = parseTs(
       data.metadata?.startTime ?? data.metadata?.endTime ?? data.created_at ?? data.updated_at,
     );
     if (ts) {
-      dates.add(toDateKey(ts));
+      dates.add(dateKey(ts));
       continue;
     }
 
     const fallbackTs = await readFileMtime(filePath);
-    if (fallbackTs) dates.add(toDateKey(fallbackTs));
+    if (fallbackTs) dates.add(dateKey(fallbackTs));
   }
 }
 
@@ -419,8 +529,8 @@ async function discoverAntigravityDates(dates: Set<string>): Promise<void> {
     } catch {
       continue;
     }
-    const ts = parseTimestamp(data.updatedAt);
-    if (ts) dates.add(toDateKey(ts));
+    const ts = parseTs(data.updatedAt);
+    if (ts) dates.add(dateKey(ts));
   }
 
   for (const filePath of browserFiles) {
@@ -433,8 +543,8 @@ async function discoverAntigravityDates(dates: Set<string>): Promise<void> {
     } catch {
       continue;
     }
-    const ts = parseTimestamp(data.highlights?.[0]?.start_time ?? data.highlights?.[0]?.end_time);
-    if (ts) dates.add(toDateKey(ts));
+    const ts = parseTs(data.highlights?.[0]?.start_time ?? data.highlights?.[0]?.end_time);
+    if (ts) dates.add(dateKey(ts));
   }
 }
 
@@ -473,8 +583,8 @@ async function discoverClaudeDates(dates: Set<string>): Promise<void> {
           } catch {
             continue;
           }
-          const ts = parseTimestamp(record.timestamp);
-          if (ts) dates.add(toDateKey(ts));
+          const ts = parseTs(record.timestamp);
+          if (ts) dates.add(dateKey(ts));
         }
       }
     }
@@ -501,8 +611,8 @@ async function discoverCodexDates(dates: Set<string>): Promise<void> {
         continue;
       }
       if (record.type !== 'event_msg' || record.payload?.type !== 'token_count') continue;
-      const ts = parseTimestamp(record.timestamp);
-      if (ts) dates.add(toDateKey(ts));
+      const ts = parseTs(record.timestamp);
+      if (ts) dates.add(dateKey(ts));
     }
   }
 }
@@ -561,22 +671,9 @@ async function safeReadUtf8(filePath: string): Promise<string | null> {
   }
 }
 
-function parseTimestamp(value?: string | number): Date | null {
-  if (value === undefined || value === null || value === '') return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
 function getTodayLocalDate(): Date {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-}
-
-function toDateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 function getOrCreate(map: Map<string, Totals>, key: string): Totals {
@@ -625,96 +722,12 @@ function mergeTotals(target: Totals, source: Totals): Totals {
   return target;
 }
 
-const FAST_MULTIPLIER = 6;
-
-const CLAUDE_PRICING: Record<string, { input: number; cache_write_5m: number; cache_write_1h: number; cache_read: number; output: number }> = {
-  'claude-fable-5': { input: 10, cache_write_5m: 12.5, cache_write_1h: 20, cache_read: 1, output: 50 },
-  'claude-sonnet-5': { input: 2, cache_write_5m: 2.5, cache_write_1h: 4, cache_read: 0.2, output: 10 },
-  'claude-opus-4-8': { input: 5, cache_write_5m: 6.25, cache_write_1h: 10, cache_read: 0.5, output: 25 },
-  'claude-opus-4-7': { input: 5, cache_write_5m: 6.25, cache_write_1h: 10, cache_read: 0.5, output: 25 },
-  'claude-opus-4-6': { input: 5, cache_write_5m: 6.25, cache_write_1h: 10, cache_read: 0.5, output: 25 },
-  'claude-opus-4-5': { input: 5, cache_write_5m: 6.25, cache_write_1h: 10, cache_read: 0.5, output: 25 },
-  'claude-opus-4-1': { input: 15, cache_write_5m: 18.75, cache_write_1h: 30, cache_read: 1.5, output: 75 },
-  'claude-opus-4': { input: 15, cache_write_5m: 18.75, cache_write_1h: 30, cache_read: 1.5, output: 75 },
-  'claude-opus-3': { input: 15, cache_write_5m: 18.75, cache_write_1h: 30, cache_read: 1.5, output: 75 },
-  'claude-sonnet-4-6': { input: 3, cache_write_5m: 3.75, cache_write_1h: 6, cache_read: 0.3, output: 15 },
-  'claude-sonnet-4-5': { input: 3, cache_write_5m: 3.75, cache_write_1h: 6, cache_read: 0.3, output: 15 },
-  'claude-sonnet-4': { input: 3, cache_write_5m: 3.75, cache_write_1h: 6, cache_read: 0.3, output: 15 },
-  'claude-sonnet-3.7': { input: 3, cache_write_5m: 3.75, cache_write_1h: 6, cache_read: 0.3, output: 15 },
-  'claude-haiku-4-5': { input: 1, cache_write_5m: 1.25, cache_write_1h: 2, cache_read: 0.1, output: 5 },
-  'claude-haiku-3-5': { input: 0.8, cache_write_5m: 1, cache_write_1h: 1.6, cache_read: 0.08, output: 4 },
-  'claude-haiku-3': { input: 0.25, cache_write_5m: 0.3, cache_write_1h: 0.5, cache_read: 0.03, output: 1.25 },
-};
-
-const OPENAI_PRICING: Record<string, { input: number; cached_input: number | null; output: number; estimated: boolean }> = {
-  'gpt-5.6-sol': { input: 5, cached_input: 0.5, output: 30, estimated: false },
-  'gpt-5.6-terra': { input: 2.5, cached_input: 0.25, output: 15, estimated: false },
-  'gpt-5.6-luna': { input: 1, cached_input: 0.1, output: 6, estimated: false },
-  'gpt-5.5': { input: 5, cached_input: 0.5, output: 30, estimated: false },
-  'gpt-5.4-pro': { input: 30, cached_input: null, output: 180, estimated: false },
-  'gpt-5.4': { input: 2.5, cached_input: 0.25, output: 15, estimated: false },
-  'gpt-5.4-mini': { input: 0.75, cached_input: 0.075, output: 4.5, estimated: false },
-  'gpt-5.4-nano': { input: 0.2, cached_input: 0.02, output: 1.25, estimated: false },
-  'gpt-5.2-pro': { input: 21, cached_input: null, output: 168, estimated: false },
-  'gpt-5.2': { input: 1.75, cached_input: 0.175, output: 14, estimated: false },
-  'gpt-5.1': { input: 1.25, cached_input: 0.125, output: 10, estimated: false },
-  'gpt-5': { input: 1.25, cached_input: 0.125, output: 10, estimated: false },
-  'gpt-5-pro': { input: 15, cached_input: null, output: 120, estimated: false },
-  'gpt-5-mini': { input: 0.25, cached_input: 0.025, output: 2, estimated: false },
-  'gpt-5-nano': { input: 0.05, cached_input: 0.005, output: 0.4, estimated: false },
-  'gpt-5-codex': { input: 1.25, cached_input: 0.125, output: 10, estimated: false },
-  'gpt-5.1-codex': { input: 1.25, cached_input: 0.125, output: 10, estimated: false },
-  'gpt-5.1-codex-mini': { input: 0.25, cached_input: 0.025, output: 2, estimated: false },
-  'gpt-5.1-codex-max': { input: 1.25, cached_input: 0.125, output: 10, estimated: false },
-  'gpt-5.2-codex': { input: 1.75, cached_input: 0.175, output: 14, estimated: false },
-  'gpt-5.3-codex': { input: 1.75, cached_input: 0.175, output: 14, estimated: false },
-  'gpt-4.1': { input: 2, cached_input: 0.5, output: 8, estimated: false },
-  'gpt-4.1-mini': { input: 0.4, cached_input: 0.1, output: 1.6, estimated: false },
-  'gpt-4.1-nano': { input: 0.1, cached_input: 0.025, output: 0.4, estimated: false },
-  'gpt-4o': { input: 2.5, cached_input: 1.25, output: 10, estimated: false },
-  'gpt-4o-2024-05-13': { input: 5, cached_input: null, output: 15, estimated: false },
-  'gpt-4o-mini': { input: 0.15, cached_input: 0.075, output: 0.6, estimated: false },
-  'o1': { input: 15, cached_input: 7.5, output: 60, estimated: false },
-  'o1-pro': { input: 150, cached_input: null, output: 600, estimated: false },
-  'o3-pro': { input: 20, cached_input: null, output: 80, estimated: false },
-  'o3': { input: 2, cached_input: 0.5, output: 8, estimated: false },
-  'o4-mini': { input: 1.1, cached_input: 0.275, output: 4.4, estimated: false },
-  'o3-mini': { input: 1.1, cached_input: 0.55, output: 4.4, estimated: false },
-  'o1-mini': { input: 1.1, cached_input: 0.55, output: 4.4, estimated: false },
-  'gpt-4-turbo-2024-04-09': { input: 10, cached_input: null, output: 30, estimated: false },
-  'gpt-4-0125-preview': { input: 10, cached_input: null, output: 30, estimated: false },
-  'gpt-4-1106-preview': { input: 10, cached_input: null, output: 30, estimated: false },
-  'gpt-4-1106-vision-preview': { input: 10, cached_input: null, output: 30, estimated: false },
-  'gpt-4-0613': { input: 30, cached_input: null, output: 60, estimated: false },
-  'gpt-4-0314': { input: 30, cached_input: null, output: 60, estimated: false },
-  'gpt-4-32k': { input: 60, cached_input: null, output: 120, estimated: false },
-  'gpt-3.5-turbo': { input: 0.5, cached_input: null, output: 1.5, estimated: false },
-  'gpt-3.5-turbo-0125': { input: 0.5, cached_input: null, output: 1.5, estimated: false },
-  'gpt-3.5-turbo-1106': { input: 1, cached_input: null, output: 2, estimated: false },
-  'gpt-3.5-turbo-0613': { input: 1.5, cached_input: null, output: 2, estimated: false },
-  'gpt-3.5-0301': { input: 1.5, cached_input: null, output: 2, estimated: false },
-  'gpt-3.5-turbo-instruct': { input: 1.5, cached_input: null, output: 2, estimated: false },
-  'gpt-3.5-turbo-16k-0613': { input: 3, cached_input: null, output: 4, estimated: false },
-  'davinci-002': { input: 2, cached_input: null, output: 2, estimated: false },
-  'babbage-002': { input: 0.4, cached_input: null, output: 0.4, estimated: false },
-  'o3-deep-research': { input: 10, cached_input: 2.5, output: 40, estimated: false },
-  'o4-mini-deep-research': { input: 2, cached_input: 0.5, output: 8, estimated: false },
-  'computer-use-preview': { input: 3, cached_input: null, output: 12, estimated: false },
-  'text-embedding-3-small': { input: 0.02, cached_input: null, output: 0, estimated: false },
-  'text-embedding-3-large': { input: 0.13, cached_input: null, output: 0, estimated: false },
-  'text-embedding-ada-002': { input: 0.1, cached_input: null, output: 0, estimated: false },
-  'codex-mini-latest': { input: 1.5, cached_input: 0.375, output: 6, estimated: false },
-};
-
-const GEMINI_PRICING: Record<string, { input: number; cache_read: number; output: number }> = {
-  'gemini-3-flash': { input: 0.1, cache_read: 0.025, output: 0.4 },
-  'gemini-2.0-flash': { input: 0.1, cache_read: 0.025, output: 0.4 },
-  'gemini-1.5-flash': { input: 0.075, cache_read: 0.01875, output: 0.3 },
-  'gemini-1.5-pro': { input: 3.5, cache_read: 0.875, output: 10.5 },
-};
-
-function toBreakdownTotals(breakdown: IngestBreakdown, warnings: Set<string>): Totals {
-  const estimatedCostUsd = calculateBreakdownCost(breakdown, warnings);
+function toBreakdownTotals(
+  breakdown: IngestBreakdown,
+  warnings: Set<string>,
+  pricingCatalog?: PricingCatalog,
+): Totals {
+  const estimatedCostUsd = calculateBreakdownCost(breakdown, warnings, pricingCatalog);
   return {
     eventCount: breakdown.eventCount,
     inputTokens: breakdown.inputTokens,
@@ -732,106 +745,54 @@ function toBreakdownTotals(breakdown: IngestBreakdown, warnings: Set<string>): T
   };
 }
 
-export function calculateBreakdownCost(breakdown: IngestBreakdown, warnings: Set<string>): number {
-  // 优先使用 Claude Code 预算的费用（costUSD）
-  if (breakdown.costUSD != null && breakdown.costUSD > 0) {
+/**
+ * 计算单个 breakdown 的成本：
+ * 1. Trae 国际版官方 API 与 OpenCode 本地记录的供应商费用始终采用
+ * 2. 其他 scanner 的 costUSD 仅在定价版本匹配时采用
+ * 3. 否则委托给 @aiusage/shared 的 calculateCost
+ *
+ * 失败/估算情况注入 warning 给上层报告展示。
+ */
+export function calculateBreakdownCost(
+  breakdown: IngestBreakdown,
+  warnings: Set<string>,
+  pricingCatalog?: PricingCatalog,
+): number {
+  const effectivePricingVersion = pricingCatalog?.version ?? PRICING_VERSION;
+  const sourceCostMatchesCatalog =
+    breakdown.product === 'trae-intl' ||
+    breakdown.product === 'opencode' ||
+    breakdown.pricingVersion == null ||
+    breakdown.pricingVersion === effectivePricingVersion;
+  if (breakdown.costUSD != null && breakdown.costUSD > 0 && sourceCostMatchesCatalog) {
     return breakdown.costUSD;
   }
 
-  if (
-    breakdown.provider === 'anthropic' &&
-    (breakdown.product === 'claude-code' || breakdown.product === 'codex')
-  ) {
-    // 检测 fast 模式（model 名以 -fast 结尾）
-    const isFast = breakdown.model.endsWith('-fast');
-    const baseModel = isFast ? breakdown.model.replace(/-fast$/, '') : breakdown.model;
-    const resolved = resolveModel(baseModel, CLAUDE_PRICING);
-    if (!resolved) {
-      warnings.add(`Claude 模型 ${breakdown.model} 未配置公开单价，已跳过成本估算。`);
-      return 0;
-    }
-    if (resolved.normalized) {
-      warnings.add(`${breakdown.model} 已按 ${resolved.model} 的公开单价估算。`);
-    }
-    const pricing = CLAUDE_PRICING[resolved.model];
-    const baseCost =
-      (breakdown.inputTokens / 1_000_000) * pricing.input +
-      (((breakdown.cacheWrite5mTokens ?? breakdown.cacheWriteTokens) || 0) / 1_000_000) * pricing.cache_write_5m +
-      ((breakdown.cacheWrite1hTokens ?? 0) / 1_000_000) * pricing.cache_write_1h +
-      (breakdown.cachedInputTokens / 1_000_000) * pricing.cache_read +
-      (breakdown.outputTokens / 1_000_000) * pricing.output;
-    return isFast ? baseCost * FAST_MULTIPLIER : baseCost;
+  const result = calculateCost(
+    breakdown.provider,
+    breakdown.product,
+    breakdown.model,
+    {
+      inputTokens: breakdown.inputTokens,
+      cachedInputTokens: breakdown.cachedInputTokens,
+      cacheWriteTokens: breakdown.cacheWriteTokens,
+      cacheWrite5mTokens: breakdown.cacheWrite5mTokens,
+      cacheWrite1hTokens: breakdown.cacheWrite1hTokens,
+      outputTokens: breakdown.outputTokens,
+    },
+    {
+      ...(pricingCatalog ? { catalog: pricingCatalog } : {}),
+      requestCount: breakdown.eventCount,
+    },
+  );
+
+  if (result.costStatus === 'unavailable') {
+    warnings.add(`${breakdown.provider}/${breakdown.product}/${breakdown.model} 暂无定价配置，已跳过成本估算。`);
+  } else if (result.costStatus === 'estimated' && result.resolvedModel && result.resolvedModel !== breakdown.model) {
+    warnings.add(`${breakdown.model} 已按 ${result.resolvedModel} 的公开单价估算。`);
+  } else if (result.costStatus === 'estimated' && result.matchedTierIndex !== undefined) {
+    warnings.add(`${breakdown.model} 的阶梯价格已按每事件平均输入量估算。`);
   }
 
-  if (breakdown.provider === 'kiro' && breakdown.product === 'kiro') {
-    const isFast = breakdown.model.endsWith('-fast');
-    const baseModel = isFast ? breakdown.model.replace(/-fast$/, '') : breakdown.model;
-    const resolved = resolveModel(baseModel, CLAUDE_PRICING);
-    if (!resolved) {
-      warnings.add(`Kiro 模型 ${breakdown.model} 未配置公开单价，已跳过成本估算。`);
-      return 0;
-    }
-    if (resolved.normalized) {
-      warnings.add(`Kiro ${breakdown.model} 已按 ${resolved.model} 的公开单价估算。`);
-    }
-    const pricing = CLAUDE_PRICING[resolved.model];
-    return (
-      (breakdown.inputTokens / 1_000_000) * pricing.input +
-      (((breakdown.cacheWrite5mTokens ?? breakdown.cacheWriteTokens) || 0) / 1_000_000) * pricing.cache_write_5m +
-      ((breakdown.cacheWrite1hTokens ?? 0) / 1_000_000) * pricing.cache_write_1h +
-      (breakdown.cachedInputTokens / 1_000_000) * pricing.cache_read +
-      (breakdown.outputTokens / 1_000_000) * pricing.output
-    );
-  }
-
-  if (breakdown.provider === 'openai' && breakdown.product === 'codex') {
-    const resolved = resolveModel(breakdown.model, OPENAI_PRICING);
-    if (!resolved) {
-      warnings.add(`Codex/OpenAI 模型 ${breakdown.model} 未配置公开单价，已跳过成本估算。`);
-      return 0;
-    }
-    const pricing = OPENAI_PRICING[resolved.model];
-    if (resolved.normalized) {
-      warnings.add(`${breakdown.model} 已按 ${resolved.model} 的公开单价估算。`);
-    } else if (pricing.estimated) {
-      warnings.add(`${breakdown.model} 未在公开价目表单列，当前按 GPT-5 公开单价估算。`);
-    }
-    return (
-      (breakdown.inputTokens / 1_000_000) * pricing.input +
-      ((breakdown.cachedInputTokens / 1_000_000) * (pricing.cached_input ?? 0)) +
-      (breakdown.outputTokens / 1_000_000) * pricing.output
-    );
-  }
-
-  if (breakdown.provider === 'google' && breakdown.product === 'gemini-cli') {
-    const resolved = resolveModel(breakdown.model, GEMINI_PRICING);
-    if (!resolved) {
-      warnings.add(`Gemini 模型 ${breakdown.model} 未配置公开单价，已跳过成本估算。`);
-      return 0;
-    }
-    const pricing = GEMINI_PRICING[resolved.model];
-    if (resolved.normalized) {
-      warnings.add(`${breakdown.model} 已按 ${resolved.model} 的公开单价估算。`);
-    }
-    return (
-      (breakdown.inputTokens / 1_000_000) * pricing.input +
-      (breakdown.cachedInputTokens / 1_000_000) * pricing.cache_read +
-      (breakdown.outputTokens / 1_000_000) * pricing.output
-    );
-  }
-
-  warnings.add(`${breakdown.provider}/${breakdown.product} 暂无本地定价策略，已跳过成本估算。`);
-  return 0;
-}
-
-function resolveModel<T>(model: string, pricingTable: Record<string, T>): { model: string; normalized: boolean } | null {
-  if (model in pricingTable) {
-    return { model, normalized: false };
-  }
-  for (const known of Object.keys(pricingTable).sort((a, b) => b.length - a.length)) {
-    if (model.startsWith(`${known}-`)) {
-      return { model: known, normalized: true };
-    }
-  }
-  return null;
+  return result.estimatedCostUsd;
 }
