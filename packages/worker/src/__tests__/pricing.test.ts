@@ -90,6 +90,47 @@ describe('calculateCost: 基本计费', () => {
     expect(result.costStatus).toBe('exact');
   });
 
+  it('Claude opus-5 公开价目表计费', () => {
+    // opus-5: input=$5/M, cached=$0.50/M, 5m write=$6.25/M, 1h write=$10/M, output=$25/M
+    // 与 opus-4-8 同价（Anthropic 官方价目表）
+    const result = calculateCost('anthropic', 'claude-code', 'claude-opus-5', {
+      inputTokens: 1_000_000,
+      cachedInputTokens: 1_000_000,
+      cacheWriteTokens: 1_500_000,
+      cacheWrite5mTokens: 1_000_000,
+      cacheWrite1hTokens: 500_000,
+      outputTokens: 200_000,
+    });
+    // 5 + 0.5 + 6.25 + 5 + 5 = $21.75
+    expect(result.estimatedCostUsd).toBe(21.75);
+    expect(result.costStatus).toBe('exact');
+  });
+
+  it('Claude opus-5 定价与 opus-4-8 一致', () => {
+    const tokens = {
+      inputTokens: 500_000,
+      cachedInputTokens: 250_000,
+      cacheWriteTokens: 100_000,
+      outputTokens: 200_000,
+    };
+    const opus5 = calculateCost('anthropic', 'claude-code', 'claude-opus-5', tokens);
+    const opus48 = calculateCost('anthropic', 'claude-code', 'claude-opus-4-8', tokens);
+    expect(opus5.estimatedCostUsd).toBe(opus48.estimatedCostUsd);
+    expect(opus5.costStatus).toBe('exact');
+  });
+
+  it('claude-opus-5 带日期后缀归一化到 claude-opus-5', () => {
+    const result = calculateCost('anthropic', 'claude-code', 'claude-opus-5-20260724', {
+      inputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 0,
+    });
+    expect(result.estimatedCostUsd).toBe(5);
+    // 归一化命中而非原样精确匹配时标记为 estimated
+    expect(result.costStatus).toBe('estimated');
+  });
+
   it('Codex gpt-5.4 基本 input/output 计费', () => {
     // gpt-5.4: input=$2.5/M, output=$15/M
     const result = calculateCost('openai', 'codex', 'gpt-5.4', {
