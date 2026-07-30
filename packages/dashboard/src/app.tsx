@@ -524,6 +524,9 @@ export function App() {
   useCurrencyStore(); // subscribe to re-render on toggle
   useFaviconFromLogo();
   const isDark = useIsDark();
+  // 活动表没有 model 列（buildActivityWhere 在有模型筛选时注入 `1 = 0`），
+  // 因此模型筛选生效时所有交互指标都是结构性的 0，必须标记为不可用。
+  const modelFilterActive = (filters.models?.length ?? 0) > 0;
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 639px)');
@@ -761,10 +764,12 @@ export function App() {
             <div className="card">
               <KpiCard
                 label={t.userMessages}
-                value={typeof overview?.interactionMetrics?.userMessageCount === 'number'
-                  ? formatNumber(overview.interactionMetrics.userMessageCount)
-                  : t.unavailable}
-                delta={kpiDeltas.userMessages}
+                // 活动指标不按模型维度统计：有模型筛选时服务端只能返回 0，
+                // 这里必须显示 N/A 而不是把结构性的 0（连同对比 delta）当成真实值。
+                value={modelFilterActive || typeof overview?.interactionMetrics?.userMessageCount !== 'number'
+                  ? t.unavailable
+                  : formatNumber(overview.interactionMetrics.userMessageCount)}
+                delta={modelFilterActive ? undefined : kpiDeltas.userMessages}
               />
             </div>
             <div className="card">
@@ -790,7 +795,7 @@ export function App() {
           {overview?.interactionMetrics && (
             <InteractionMetricsSection
               metrics={overview.interactionMetrics}
-              modelFilterActive={(filters.models?.length ?? 0) > 0}
+              modelFilterActive={modelFilterActive}
               t={t}
               locale={locale}
               animationDelay="150ms"

@@ -70,12 +70,16 @@ function mergeBreakdowns(items: IngestBreakdown[]): IngestBreakdown[] {
 export function applyActivityPrivacy<T extends ProjectPrivacyFields & {
   provider: string; product: string; source: string;
   kind: string; name: string; count: number; confidence: 'exact' | 'proxy';
+  usageDate?: string;
 }>(items: T[], visibility: ProjectVisibility | undefined): T[] {
   const merged = new Map<string, T>();
 
   for (const item of applyProjectPrivacy(items, visibility)) {
+    // usageDate 必须进 key：调用方是在按天分组之前把多天的数据一起传进来的，
+    // 少了日期会把不同日期的同名活动并到第一条的日期上，
+    // 其余日期变成空活动上传，服务端对应行会被整日清理删掉。
     const key = [
-      item.provider, item.product, item.source,
+      item.usageDate ?? '', item.provider, item.product, item.source,
       item.project, item.kind, item.name, item.confidence,
     ].join('\u0000');
     const existing = merged.get(key);

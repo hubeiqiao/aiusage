@@ -46,6 +46,34 @@ describe('applyActivityPrivacy: hidden 模式聚合活动指标', () => {
     expect(merged[0].count).toBe(11);
   });
 
+  it('不跨日期合并：调用方在按天分组前传入多天数据', () => {
+    // 少了 usageDate 会把 8/1 的计数并进 7/31，8/1 变成空活动上传，
+    // 服务端对应行会被整日清理删掉。
+    const merged = applyActivityPrivacy(
+      [
+        { ...item('/Users/joe/a', 5), usageDate: '2026-07-31' },
+        { ...item('/Users/joe/b', 6), usageDate: '2026-08-01' },
+      ],
+      'hidden',
+    );
+
+    expect(merged).toHaveLength(2);
+    expect(merged.map(m => m.usageDate).sort()).toEqual(['2026-07-31', '2026-08-01']);
+    expect(merged.every(m => m.project === '_redacted_')).toBe(true);
+  });
+
+  it('同一天内仍然合并', () => {
+    const merged = applyActivityPrivacy(
+      [
+        { ...item('/Users/joe/a', 5), usageDate: '2026-07-31' },
+        { ...item('/Users/joe/b', 6), usageDate: '2026-07-31' },
+      ],
+      'hidden',
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].count).toBe(11);
+  });
+
   it('不同 kind/name 仍然保持独立', () => {
     const merged = applyActivityPrivacy(
       [item('/Users/joe/a', 5), { ...item('/Users/joe/b', 6), name: 'Write' }],

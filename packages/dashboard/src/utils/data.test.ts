@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildQuery, padMonth } from './data';
+import { buildQuery, padMonth, currentMonthDates } from './data';
 
 test('buildQuery encodes multi-select filters as repeated params', () => {
   const query = buildQuery({
@@ -48,4 +48,16 @@ test('padMonth keeps zero-cost days that still have events', () => {
   assert.equal(padded.totalEvents, 150, 'zero-cost day events must be retained');
   assert.equal(padded.activeDays, 2, 'zero-cost day must still count as active');
   assert.equal(padded.totalCostUsd, 10);
+});
+
+test('currentMonthDates uses UTC so it matches the Worker month window', () => {
+  // Worker 用 startOfUtcDay 选月；本地年月在月末跨时区时会和它错开一个月，
+  // 导致「本月」视图 key 对不上而整片归零。
+  const dates = currentMonthDates();
+  const now = new Date();
+  const expectedPrefix = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+
+  assert.ok(dates.length >= 28 && dates.length <= 31);
+  assert.ok(dates.every((d) => d.startsWith(expectedPrefix)), `expected all dates in ${expectedPrefix}`);
+  assert.equal(dates[0], `${expectedPrefix}-01`);
 });

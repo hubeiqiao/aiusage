@@ -303,6 +303,12 @@ function ProductTable({
   t: T;
 }) {
   const sortedModels = Object.entries(models).sort(([a], [b]) => a.localeCompare(b));
+  // 缓存写入价不只 Anthropic 有：当前目录里 OpenAI GPT-5.6 与 Moonshot 也提供
+  // cache_write_per_million（被 resolveRates 归一到 cacheWrite5m）。
+  // 按「该产品是否真的有这一列」渲染，避免漏掉一个计费维度。
+  const resolvedByModel = sortedModels.map(([model, pricing]) => [model, resolveRates(pricing, fx)] as const);
+  const hasCacheWrite5m = resolvedByModel.some(([, r]) => r.cacheWrite5m != null);
+  const hasCacheWrite1h = resolvedByModel.some(([, r]) => r.cacheWrite1h != null);
 
   return (
     <div>
@@ -327,15 +333,15 @@ function ProductTable({
               <th className="border-b border-slate-100 px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400 dark:border-white/[0.06] dark:text-slate-500">
                 {t.cacheHitPrice.toUpperCase()}
               </th>
-              {isAnthropic && (
-                <>
-                  <th className="border-b border-slate-100 px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400 dark:border-white/[0.06] dark:text-slate-500">
-                    {t.cacheWrite5m.toUpperCase()}
-                  </th>
-                  <th className="border-b border-slate-100 px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400 dark:border-white/[0.06] dark:text-slate-500">
-                    {t.cacheWrite1h.toUpperCase()}
-                  </th>
-                </>
+              {hasCacheWrite5m && (
+                <th className="border-b border-slate-100 px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400 dark:border-white/[0.06] dark:text-slate-500">
+                  {(isAnthropic ? t.cacheWrite5m : t.cacheWrite).toUpperCase()}
+                </th>
+              )}
+              {hasCacheWrite1h && (
+                <th className="border-b border-slate-100 px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400 dark:border-white/[0.06] dark:text-slate-500">
+                  {t.cacheWrite1h.toUpperCase()}
+                </th>
               )}
               <th className="border-b border-slate-100 px-3 py-2 text-right text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400 dark:border-white/[0.06] dark:text-slate-500">
                 {t.outputPrice.toUpperCase()}
@@ -356,15 +362,15 @@ function ProductTable({
                 <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
                   {formatPrice(rates.cachedInput)}
                 </td>
-                {isAnthropic && (
-                  <>
-                    <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
-                      {formatPrice(rates.cacheWrite5m)}
-                    </td>
-                    <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
-                      {formatPrice(rates.cacheWrite1h)}
-                    </td>
-                  </>
+                {hasCacheWrite5m && (
+                  <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
+                    {formatPrice(rates.cacheWrite5m)}
+                  </td>
+                )}
+                {hasCacheWrite1h && (
+                  <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
+                    {formatPrice(rates.cacheWrite1h)}
+                  </td>
                 )}
                 <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
                   {formatPrice(rates.output)}

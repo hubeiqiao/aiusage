@@ -3,10 +3,14 @@ import type { OverviewPayload, FiltersState } from '../hooks/use-overview';
 
 /** Get all YYYY-MM-DD dates for the current month (1st to last day). */
 export function currentMonthDates(): string[] {
+  // Worker 用 UTC 选择「本月」（buildDateWindow 走 startOfUtcDay），
+  // 这里若用浏览器本地年月，在月末跨时区的那几个小时会对不上：
+  // 例如加州 7/31 时 UTC 已是 8/1，接口返回 8 月而这里只留 7 月的 key，
+  // 「本月」视图会整片归零。
   const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const last = new Date(y, m + 1, 0).getDate();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
   const result: string[] = [];
   for (let d = 1; d <= last; d++) {
     result.push(`${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
