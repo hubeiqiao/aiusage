@@ -27,7 +27,10 @@ export function padMonth(ov: OverviewPayload): OverviewPayload {
     outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0,
   });
 
-  const monthTrend = dailyTrend.filter((d) => d.estimatedCostUsd > 0);
+  // 「有数据的一天」按事件数或费用判断，而不是只看 estimatedCostUsd > 0：
+  // 未配置单价的模型（例如 Opus 5 上线到目录补齐之前）会产生零成本但有事件的
+  // 真实用量，只按费用过滤会让这些用量从 totalEvents / activeDays 里消失。
+  const monthTrend = dailyTrend.filter((d) => Number(d.eventCount || 0) > 0 || Number(d.estimatedCostUsd || 0) > 0);
   const totalCostUsd = monthTrend.reduce((sum, d) => sum + Number(d.estimatedCostUsd || 0), 0);
   const totalEvents = monthTrend.reduce((sum, d) => sum + Number(d.eventCount || 0), 0);
   const activeDays = monthTrend.length;

@@ -723,6 +723,10 @@ export function buildDateWindow(
   if (range === '7d') days = 7;
   else if (range === '30d') days = 30;
   else if (range === '3m' || range === '90d') days = 90;
+  // embed-docs 与 CLI 都对外提供 180 天窗口（`180d` / `6m`）。
+  // 这里若不认，handleOverview 会返回 400，前端静默回退到 DEMO_OVERVIEW，
+  // 把演示数据当成真实数据展示。
+  else if (range === '6m' || range === '180d') days = 180;
   else if (range === 'month') {
     start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
     days = diffUtcDays(start, today) + 1;

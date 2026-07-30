@@ -7,16 +7,70 @@ import type { T } from '../i18n';
 // Types
 // ────────────────────────────────────────
 
-interface ModelPricing {
-  input_per_million_usd: number;
-  output_per_million_usd: number;
-  cached_input_per_million_usd: number | null;
-  cache_write_5m_per_million_usd: number;
-  cache_write_1h_per_million_usd: number;
+/**
+ * 公开定价接口已切换为新结构（`*_per_million` + currency + 可选 tiers）。
+ * 这里同时兼容旧结构 `*_per_million_usd`，以便 Worker 尚未升级时页面仍可渲染。
+ */
+interface PricingTier {
+  threshold?: number;
+  input_per_million?: number;
+  output_per_million?: number;
+  cached_input_per_million?: number | null;
+  cache_write_5m_per_million?: number;
+  cache_write_1h_per_million?: number;
+  cache_write_per_million?: number;
+}
+
+interface ModelPricing extends PricingTier {
+  currency?: string;
+  tiers?: PricingTier[];
+  // ── 旧结构（向后兼容）──
+  input_per_million_usd?: number;
+  output_per_million_usd?: number;
+  cached_input_per_million_usd?: number | null;
+  cache_write_5m_per_million_usd?: number;
+  cache_write_1h_per_million_usd?: number;
+}
+
+interface ResolvedRates {
+  input: number | null;
+  cachedInput: number | null;
+  cacheWrite5m: number | null;
+  cacheWrite1h: number | null;
+  output: number | null;
+}
+
+/** 非 USD 定价按目录里的汇率折算，保持整页单位一致。 */
+function toUsd(value: number | null | undefined, currency: string | undefined, fx: Record<string, number> | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  if (!currency || currency === 'USD') return value;
+  const rate = fx?.[currency];
+  return rate ? value / rate : value;
+}
+
+/** 新结构优先，其次首个阶梯，最后回退旧字段。 */
+function resolveRates(pricing: ModelPricing, fx: Record<string, number> | undefined): ResolvedRates {
+  const base: PricingTier = pricing.tiers?.[0] ?? pricing;
+  const pick = (
+    next: number | null | undefined,
+    tier: number | null | undefined,
+    legacy: number | null | undefined,
+  ) => (next ?? tier ?? legacy ?? null);
+
+  const cacheWrite5m = pick(pricing.cache_write_5m_per_million, base.cache_write_5m_per_million ?? base.cache_write_per_million, pricing.cache_write_5m_per_million_usd);
+
+  return {
+    input: toUsd(pick(pricing.input_per_million, base.input_per_million, pricing.input_per_million_usd), pricing.currency, fx),
+    cachedInput: toUsd(pick(pricing.cached_input_per_million, base.cached_input_per_million, pricing.cached_input_per_million_usd), pricing.currency, fx),
+    cacheWrite5m: toUsd(cacheWrite5m, pricing.currency, fx),
+    cacheWrite1h: toUsd(pick(pricing.cache_write_1h_per_million, base.cache_write_1h_per_million, pricing.cache_write_1h_per_million_usd), pricing.currency, fx),
+    output: toUsd(pick(pricing.output_per_million, base.output_per_million, pricing.output_per_million_usd), pricing.currency, fx),
+  };
 }
 
 interface PricingCatalog {
   version: string;
+  fx?: Record<string, number>;
   aliases: Record<string, string>;
   providers: Record<string, Record<string, { models: Record<string, ModelPricing> }>>;
 }
@@ -99,8 +153,8 @@ const LOGO_COMPONENTS: Record<string, (props: { className?: string }) => JSX.Ele
 // Helpers
 // ────────────────────────────────────────
 
-function formatPrice(value: number | null, treatZeroAsDash = false): string {
-  if (value === null) return '--';
+function formatPrice(value: number | null | undefined, treatZeroAsDash = false): string {
+  if (value == null || !Number.isFinite(value)) return '--';
   if (treatZeroAsDash && value === 0) return '--';
   if (value === 0) return '$0.00';
   if (value >= 1) return `$${value.toFixed(2)}`;
@@ -160,6 +214,7 @@ function ProviderSection({
   collapsed,
   onToggle,
   isDark,
+  fx,
   t,
 }: {
   provider: string;
@@ -167,6 +222,7 @@ function ProviderSection({
   collapsed: boolean;
   onToggle: () => void;
   isDark: boolean;
+  fx?: Record<string, number>;
   t: T;
 }) {
   const brandColor = getBrandColor(provider, isDark);
@@ -223,6 +279,7 @@ function ProviderSection({
               product={product}
               models={def.models}
               isAnthropic={isAnthropic}
+              fx={fx}
               t={t}
             />
           ))}
@@ -236,11 +293,13 @@ function ProductTable({
   product,
   models,
   isAnthropic,
+  fx,
   t,
 }: {
   product: string;
   models: Record<string, ModelPricing>;
   isAnthropic: boolean;
+  fx?: Record<string, number>;
   t: T;
 }) {
   const sortedModels = Object.entries(models).sort(([a], [b]) => a.localeCompare(b));
@@ -284,32 +343,35 @@ function ProductTable({
             </tr>
           </thead>
           <tbody>
-            {sortedModels.map(([model, pricing]) => (
+            {sortedModels.map(([model, pricing]) => {
+              const rates = resolveRates(pricing, fx);
+              return (
               <tr key={model} className="group">
                 <td className="border-b border-slate-50 px-3 py-2 font-mono text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
                   {model}
                 </td>
                 <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
-                  {formatPrice(pricing.input_per_million_usd)}
+                  {formatPrice(rates.input)}
                 </td>
                 <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
-                  {formatPrice(pricing.cached_input_per_million_usd)}
+                  {formatPrice(rates.cachedInput)}
                 </td>
                 {isAnthropic && (
                   <>
                     <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
-                      {formatPrice(pricing.cache_write_5m_per_million_usd)}
+                      {formatPrice(rates.cacheWrite5m)}
                     </td>
                     <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
-                      {formatPrice(pricing.cache_write_1h_per_million_usd)}
+                      {formatPrice(rates.cacheWrite1h)}
                     </td>
                   </>
                 )}
                 <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
-                  {formatPrice(pricing.output_per_million_usd)}
+                  {formatPrice(rates.output)}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -468,6 +530,7 @@ export function PricingPage() {
             collapsed={!!collapsed[provider]}
             onToggle={() => toggle(provider)}
             isDark={isDark}
+            fx={catalog?.fx}
             t={t}
           />
         </div>

@@ -31,6 +31,21 @@ describe('overview filters', () => {
     });
   });
 
+  it('accepts the advertised 180-day window (180d / 6m)', () => {
+    const now = new Date('2026-07-20T10:00:00.000Z');
+
+    // embed-docs 对外提供 180d；CLI 用 6m。若这里返回 undefined，
+    // handleOverview 会 400，前端静默回退到 DEMO_OVERVIEW 展示演示数据。
+    expect(buildDateWindow('180d', now)).toEqual({
+      minDate: '2026-01-22',
+      maxDate: '2026-07-20',
+      days: 180,
+    });
+    expect(buildDateWindow('6m', now)).toEqual(buildDateWindow('180d', now));
+    expect(parseFilters(new URL('https://example.com/api/v1/public/overview?range=180d'))).not.toBeNull();
+    expect(parseFilters(new URL('https://example.com/api/v1/public/overview?range=6m'))).not.toBeNull();
+  });
+
   it('parses repeated and comma-separated facet params as multi-select values', () => {
     const filters = parseFilters(new URL('https://example.com/api/v1/public/overview?range=30d&product=codex&product=claude-code&model=gpt-5,claude-opus'));
 

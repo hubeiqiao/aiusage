@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildQuery } from './data';
+import { buildQuery, padMonth } from './data';
 
 test('buildQuery encodes multi-select filters as repeated params', () => {
   const query = buildQuery({
@@ -22,4 +22,30 @@ test('buildQuery encodes multi-select filters as repeated params', () => {
 test('buildQuery keeps month range for the API', () => {
   const query = buildQuery({ range: 'month', products: [] });
   assert.equal(new URLSearchParams(query).get('range'), 'month');
+});
+
+test('padMonth keeps zero-cost days that still have events', () => {
+  // 未配置单价的模型（例如目录补齐前的 Opus 5）会产生 cost=0 但 eventCount>0 的
+  // 真实用量。按费用过滤会让这些用量从 totalEvents / activeDays 里消失。
+  const today = new Date();
+  const day = (d: number) => `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+  const ov = {
+    totalDays: 2, activeDays: 2, totalEvents: 150, totalSessions: 0,
+    costBearingEvents: 100, totalCostUsd: 10, averageDailyCostUsd: 5,
+    dailyTrend: [
+      { usageDate: day(1), eventCount: 100, estimatedCostUsd: 10 },
+      { usageDate: day(2), eventCount: 50, estimatedCostUsd: 0 },
+    ],
+    tokenComposition: [],
+    providerCostShare: [], productCostShare: [], modelCostShare: [], channelCostShare: [],
+    sankey: { nodes: [], links: [] }, heatmap: [],
+    filters: { options: { providers: [] }, selected: {} },
+  } as unknown as Parameters<typeof padMonth>[0];
+
+  const padded = padMonth(ov);
+
+  assert.equal(padded.totalEvents, 150, 'zero-cost day events must be retained');
+  assert.equal(padded.activeDays, 2, 'zero-cost day must still count as active');
+  assert.equal(padded.totalCostUsd, 10);
 });

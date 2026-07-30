@@ -69,23 +69,6 @@ export interface IngestActivityItem {
   confidence: 'exact' | 'proxy';
 }
 
-export interface IngestActivityDay {
-  items: IngestActivityItem[];
-}
-
-export interface IngestActivityItem {
-  provider: Provider;
-  product: Product;
-  source: string;
-  project: string;
-  projectDisplay?: string;
-  projectAlias?: string;
-  kind: string;
-  name: string;
-  count: number;
-  confidence: 'exact' | 'proxy';
-}
-
 // ── API 响应 ──
 
 export interface ApiResponse<T = unknown> {

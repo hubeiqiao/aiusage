@@ -24,7 +24,7 @@ import { disableSchedule, enableSchedule, formatInterval, getScheduleStatus, par
 import { runDoctor } from './doctor.js';
 import { getVersion } from './version.js';
 import { discoverProjects } from './project.js';
-import { applyPrivacy, applyProjectPrivacy } from './privacy.js';
+import { applyPrivacy, applyActivityPrivacy } from './privacy.js';
 import type { IngestActivityItem, IngestDay } from '@aiusage/shared';
 import { getPricingStatus, resolvePricingCatalog } from './pricing.js';
 import { syncTraeCnUsage } from './trae-sync.js';
@@ -555,10 +555,11 @@ function parseTraeEdition(value: string | boolean | undefined, zh: boolean): 'cn
 
 function buildActivityPayloadByDate(
   items: ActivityItem[],
-  visibility: Parameters<typeof applyProjectPrivacy>[1],
+  visibility: Parameters<typeof applyActivityPrivacy>[1],
 ): Map<string, { items: IngestActivityItem[] }> {
   const map = new Map<string, { items: IngestActivityItem[] }>();
-  const sanitized = applyProjectPrivacy(items, visibility);
+  // 按天分组前先脱敏并聚合，避免 hidden 模式折叠 project 后撞上服务端活动表主键
+  const sanitized = applyActivityPrivacy(items, visibility);
   for (const item of sanitized) {
     const day = map.get(item.usageDate) ?? { items: [] };
     day.items.push({

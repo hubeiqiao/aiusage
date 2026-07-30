@@ -450,12 +450,24 @@ function InteractionMetricsSection({
   t,
   locale,
   animationDelay = '150ms',
+  modelFilterActive = false,
 }: {
   metrics: InteractionMetricsPayload;
   t: T;
   locale: Locale;
   animationDelay?: string;
+  /** 活动表没有 model 列，加了模型筛选后服务端只能返回全 0，不能当作真实measured 值展示。 */
+  modelFilterActive?: boolean;
 }) {
+  if (modelFilterActive) {
+    return (
+      <div className="card fade-up p-6" style={{ animationDelay }}>
+        <SectionHeader title={t.interactionMetrics} stat={t.unavailable} />
+        <EmptyState label={t.interactionModelScopeNotice} />
+      </div>
+    );
+  }
+
   return (
     <div className="card fade-up p-6" style={{ animationDelay }}>
       <SectionHeader
@@ -776,7 +788,13 @@ export function App() {
           </div>
 
           {overview?.interactionMetrics && (
-            <InteractionMetricsSection metrics={overview.interactionMetrics} t={t} locale={locale} animationDelay="150ms" />
+            <InteractionMetricsSection
+              metrics={overview.interactionMetrics}
+              modelFilterActive={(filters.models?.length ?? 0) > 0}
+              t={t}
+              locale={locale}
+              animationDelay="150ms"
+            />
           )}
 
           {/* ── Cost Trend ── */}
