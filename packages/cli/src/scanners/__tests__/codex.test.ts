@@ -758,6 +758,9 @@ describe('ninerouter routed models', () => {
     expect(results[0].product).toBe('codex');
     expect(results[0].model).toBe('claude-opus-4-8');
     expect(results[0].inputTokens).toBe(1000);
+    // 目录里没有 anthropic/codex，必须按 anthropic/claude-code 预算成本，
+    // 否则这些事件会以 costUSD 缺失的形式落地，本地报告显示 $0。
+    expect(results[0].costUSD).toBeGreaterThan(0);
   });
 
   it('keeps native OpenAI codex models under openai/codex', async () => {

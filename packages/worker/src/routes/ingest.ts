@@ -66,8 +66,12 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
 
     const dayCostStatus = getWorstCostStatus(costStatuses);
 
-    // 先写入父记录，避免 breakdown 外键约束失败
-    await env.DB.prepare(`
+    // 父记录 upsert + 整日清理 + breakdown 重建必须原子提交。
+    // 如果分开执行，中途任何一步失败（例如 D1 瞬时错误）都会让这一天只剩
+    // 被删空或半重建的数据；打包成一个 batch 可保证失败时保留原快照。
+    const statements: D1PreparedStatement[] = [
+      // 先写入父记录，避免 breakdown 外键约束失败
+      env.DB.prepare(`
       INSERT INTO daily_usage
         (device_id, usage_date, event_count, input_tokens, cached_input_tokens,
          cache_write_tokens, output_tokens, reasoning_output_tokens,
@@ -92,27 +96,26 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
         top_model_cost_usd = excluded.top_model_cost_usd,
         updated_at = excluded.updated_at
     `)
-      .bind(
-        tokenPayload.deviceId, day.usageDate,
-        dayTotalEvents, dayTotalInput, dayTotalCachedInput, dayTotalCacheWrite,
-        dayTotalOutput, dayTotalReasoning,
-        Math.round(dayTotalCost * 10000) / 10000, dayCostStatus, 'current',
-        'pending', 0,
-        'pending', 0,
-        now, now,
-      )
-      .run();
+        .bind(
+          tokenPayload.deviceId, day.usageDate,
+          dayTotalEvents, dayTotalInput, dayTotalCachedInput, dayTotalCacheWrite,
+          dayTotalOutput, dayTotalReasoning,
+          Math.round(dayTotalCost * 10000) / 10000, dayCostStatus, 'current',
+          'pending', 0,
+          'pending', 0,
+          now, now,
+        ),
 
-    // 重传某一天时，先清掉该设备当天的所有 breakdown 行，再按 payload 重建。
-    // CLI 每次都会扫描当天全部工具并整体上传，因此这是「以本次上传为准」的语义：
-    //  - 纠正后的数据会覆盖旧值（ON CONFLICT 也能做到）；
-    //  - 已经不存在的行（改名、误算、当天清空）会被真正删除，不会残留虚高统计。
-    // 这同时涵盖了 CLI 1.7.5 把 trae-cn / trae-intl 混存为 `trae` 的历史脏数据。
-    await env.DB.prepare(
-      'DELETE FROM daily_usage_breakdown WHERE device_id = ? AND usage_date = ?',
-    )
-      .bind(tokenPayload.deviceId, day.usageDate)
-      .run();
+      // 重传某一天时，先清掉该设备当天的所有 breakdown 行，再按 payload 重建。
+      // CLI 每次都会扫描当天全部工具并整体上传，因此这是「以本次上传为准」的语义：
+      //  - 纠正后的数据会覆盖旧值；
+      //  - 已经不存在的行（改名、误算、当天清空）会被真正删除，不会残留虚高统计。
+      // 这同时涵盖了 CLI 1.7.5 把 trae-cn / trae-intl 混存为 `trae` 的历史脏数据。
+      env.DB.prepare(
+        'DELETE FROM daily_usage_breakdown WHERE device_id = ? AND usage_date = ?',
+      )
+        .bind(tokenPayload.deviceId, day.usageDate),
+    ];
 
     for (const { breakdown: b, cost, cacheWrite5mTokens, cacheWrite1hTokens } of breakdownsWithCost) {
       const rawProject = b.project || 'unknown';
@@ -120,7 +123,7 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
       const projectDisplay = b.projectDisplay ?? (isFullPath ? rawProject.split('/').filter(Boolean).pop() || 'unknown' : rawProject);
       const projectAlias = b.projectAlias ?? null;
 
-      await env.DB.prepare(`
+      statements.push(env.DB.prepare(`
         INSERT INTO daily_usage_breakdown
           (device_id, usage_date, provider, product, channel, model, project,
            project_display, project_alias,
@@ -157,9 +160,10 @@ export async function handleIngest(request: Request, env: Env, ctx?: ExecutionCo
             cache_write_1h_tokens: cacheWrite1hTokens,
           }),
           now, now,
-        )
-        .run();
+        ));
     }
+
+    await env.DB.batch(statements);
 
     await replaceActivityMetrics(env, tokenPayload.deviceId, day.usageDate, day.activity?.items ?? [], now);
 

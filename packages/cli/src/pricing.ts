@@ -194,4 +194,9 @@ export function assertPricingCatalog(value: unknown): asserts value is PricingCa
   if (!catalog.fx || typeof catalog.fx !== 'object') {
     throw new Error('incompatible pricing catalog: missing fx table');
   }
+  // calculateCost 会直接取 catalog.aliases[model]，缺这个字段会在首次计价时崩溃，
+  // 而不是回退到下一个来源。
+  if (!catalog.aliases || typeof catalog.aliases !== 'object') {
+    throw new Error('incompatible pricing catalog: missing aliases map');
+  }
 }

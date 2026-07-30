@@ -381,7 +381,11 @@ async function processCodexFile(
         ? `codex|${dedupScope}|${state.currentModel}|${total.input}|${total.cached}|${total.output}|${total.reasoning}`
         : `codex|${dedupScope}|${state.currentModel}|${ts.getTime()}|${tokens.input}|${tokens.cached}|${tokens.output}|${tokens.reasoning}`;
 
-      const eventCost = calculateCost('openai', 'codex', state.currentModel, {
+      // ninerouter 路由的 Anthropic 模型要按 anthropic/claude-code 查表：
+      // 目录里没有 anthropic/codex 这个组合，写死 openai 会导致这些事件
+      // 拿不到 costUSD，本地报告只能显示 $0 并给出「未配置单价」警告。
+      const costProduct = state.currentProvider === 'anthropic' ? 'claude-code' : state.currentProduct;
+      const eventCost = calculateCost(state.currentProvider, costProduct, state.currentModel, {
         inputTokens: nonCachedInput,
         cachedInputTokens: cachedInput,
         cacheWriteTokens: 0,

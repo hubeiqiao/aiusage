@@ -47,6 +47,7 @@ export const TOOL_IDS = [
   'droid',
   'gemini-cli',
   'kimi-code',
+  'kiro',
   'opencode',
   'pi',
   'qwen-code',

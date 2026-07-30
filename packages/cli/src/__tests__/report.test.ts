@@ -326,6 +326,14 @@ describe('Trae CLI filters', () => {
     expect(parseToolSelection('trae')).toEqual(['trae-cn', 'trae-intl', 'trae']);
     expect(parseToolSelection('trae-cn,trae-intl')).toEqual(['trae-cn', 'trae-intl']);
   });
+
+  it('accepts kiro as a selectable tool', async () => {
+    const { parseToolSelection } = await import('../scan.js');
+
+    // scanDates 注册了 product 'kiro'，允许列表必须同步，否则 --tool kiro 会报 Unknown tool
+    expect(parseToolSelection('kiro')).toEqual(['kiro']);
+    expect(parseToolSelection('kiro,claude-code')).toEqual(['kiro', 'claude-code']);
+  });
 });
 
 describe('calculateBreakdownCost', () => {

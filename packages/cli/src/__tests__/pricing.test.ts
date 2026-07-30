@@ -63,6 +63,13 @@ describe('assertPricingCatalog', () => {
     expect(() => assertPricingCatalog(noFx)).toThrow(/missing fx table/);
   });
 
+  it('rejects a catalog without an aliases map', () => {
+    // calculateCost 直接取 catalog.aliases[model]，缺失会在首次计价时崩溃
+    const noAliases = structuredClone(newShapeCatalog) as Record<string, unknown>;
+    delete noAliases.aliases;
+    expect(() => assertPricingCatalog(noAliases)).toThrow(/missing aliases map/);
+  });
+
   it('still rejects structurally broken catalogs', () => {
     expect(() => assertPricingCatalog(null)).toThrow(/invalid pricing catalog/);
     expect(() => assertPricingCatalog({ version: '1', providers: {} })).toThrow(/invalid OpenAI pricing catalog/);
