@@ -153,6 +153,12 @@ const LOGO_COMPONENTS: Record<string, (props: { className?: string }) => JSX.Ele
 // Helpers
 // ────────────────────────────────────────
 
+function formatTokenThreshold(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
+  return String(tokens);
+}
+
 function formatPrice(value: number | null | undefined, treatZeroAsDash = false): string {
   if (value == null || !Number.isFinite(value)) return '--';
   if (treatZeroAsDash && value === 0) return '--';
@@ -306,7 +312,22 @@ function ProductTable({
   // 缓存写入价不只 Anthropic 有：当前目录里 OpenAI GPT-5.6 与 Moonshot 也提供
   // cache_write_per_million（被 resolveRates 归一到 cacheWrite5m）。
   // 按「该产品是否真的有这一列」渲染，避免漏掉一个计费维度。
-  const resolvedByModel = sortedModels.map(([model, pricing]) => [model, resolveRates(pricing, fx)] as const);
+  // 有阶梯的模型逐档展开：GPT-5.6 超过 272K input 走高档，Qwen 最多 4 档。
+  // 只显示第一档会把最便宜的价格当成通用价格展示。
+  const resolvedByModel = sortedModels.flatMap(([model, pricing]) => {
+    const tiers = pricing.tiers;
+    if (!tiers || tiers.length <= 1) {
+      return [[model, resolveRates(pricing, fx), null] as const];
+    }
+    return tiers.map((tier, i) => {
+      const prev = i > 0 ? tiers[i - 1]?.threshold : undefined;
+      const label = tier.threshold != null
+        ? `≤ ${formatTokenThreshold(tier.threshold)}`
+        : prev != null ? `> ${formatTokenThreshold(prev)}` : null;
+      // 逐档解析：把该档的费率当作该行的基准值
+      return [model, resolveRates({ ...pricing, ...tier, tiers: undefined }, fx), label] as const;
+    });
+  });
   const hasCacheWrite5m = resolvedByModel.some(([, r]) => r.cacheWrite5m != null);
   const hasCacheWrite1h = resolvedByModel.some(([, r]) => r.cacheWrite1h != null);
 
@@ -349,12 +370,13 @@ function ProductTable({
             </tr>
           </thead>
           <tbody>
-            {sortedModels.map(([model, pricing]) => {
-              const rates = resolveRates(pricing, fx);
-              return (
-              <tr key={model} className="group">
+            {resolvedByModel.map(([model, rates, tierLabel], idx) => (
+              <tr key={`${model}-${idx}`} className="group">
                 <td className="border-b border-slate-50 px-3 py-2 font-mono text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
                   {model}
+                  {tierLabel && (
+                    <span className="ml-1.5 font-sans text-[11px] text-slate-400 dark:text-slate-500">{tierLabel}</span>
+                  )}
                 </td>
                 <td className="border-b border-slate-50 px-3 py-2 text-right tabular-nums text-[13px] text-slate-700 group-last:border-b-0 dark:border-white/[0.04] dark:text-slate-400">
                   {formatPrice(rates.input)}
@@ -376,8 +398,7 @@ function ProductTable({
                   {formatPrice(rates.output)}
                 </td>
               </tr>
-              );
-            })}
+            ))}
           </tbody>
         </table>
       </div>
