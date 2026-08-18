@@ -20,7 +20,14 @@ import {
   writeConfig,
 } from './config.js';
 import { defaultLookbackDays, enrollDevice, fetchHealth, uploadDailyUsage } from './api.js';
-import { disableSchedule, enableSchedule, formatInterval, getScheduleStatus, parseInterval } from './schedule.js';
+import {
+  disableSchedule,
+  enableSchedule,
+  formatInterval,
+  getScheduleStatus,
+  parseInterval,
+  runScheduledSync,
+} from './schedule.js';
 import { runDoctor } from './doctor.js';
 import { getVersion } from './version.js';
 import { discoverProjects } from './project.js';
@@ -60,7 +67,19 @@ try {
   } else if (command === 'sync') {
     const parsed = parseArgs(argv.slice(1));
     if (parsed.flags.help) return helpForSubcommand('sync');
-    await runSync(parsed.flags, parsed.positionals);
+    if (parsed.flags.scheduled === true) {
+      await runScheduledSync(async (backfillDue) => {
+        const scheduledFlags = { ...parsed.flags };
+        if (!backfillDue) {
+          delete scheduledFlags.lookback;
+          delete scheduledFlags['batch-size'];
+          scheduledFlags.today = true;
+        }
+        await runSync(scheduledFlags, parsed.positionals);
+      });
+    } else {
+      await runSync(parsed.flags, parsed.positionals);
+    }
   } else if (command === 'trae') {
     const sub = argv[1];
     const parsed = parseArgs(argv.slice(2));
@@ -428,15 +447,17 @@ async function runSync(flags: Record<string, string | boolean>, positionals: str
       console.log(`上传至 "${target.name}" (${target.apiBaseUrl}) ...`);
     }
 
-    const BATCH_SIZE = 30;
+    const batchSize = typeof flags['batch-size'] === 'string'
+      ? parsePositiveInt(flags['batch-size'], '--batch-size')
+      : 30;
     let totalProcessed = 0;
     const allCostSummary: Record<string, { estimatedCostUsd: number; costStatus: string }> = {};
 
-    for (let i = 0; i < allDays.length; i += BATCH_SIZE) {
-      const batch = allDays.slice(i, i + BATCH_SIZE);
-      const totalBatches = Math.ceil(allDays.length / BATCH_SIZE);
+    for (let i = 0; i < allDays.length; i += batchSize) {
+      const batch = allDays.slice(i, i + batchSize);
+      const totalBatches = Math.ceil(allDays.length / batchSize);
       if (totalBatches > 1) {
-        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        const batchNum = Math.floor(i / batchSize) + 1;
         console.log(`  批次 ${batchNum}/${totalBatches}: ${batch[0].usageDate} ~ ${batch[batch.length - 1].usageDate}`);
       }
 
@@ -728,7 +749,7 @@ async function runSchedule(sub: string | undefined, flags: Record<string, string
     const every = typeof flags.every === 'string' ? flags.every : '5m';
     const { seconds } = parseInterval(every);
     const status = await enableSchedule(seconds);
-    console.log(`定时同步已启用，每 ${status.intervalLabel} 执行一次（含今日数据）。`);
+    console.log(`定时同步已启用，每 ${status.intervalLabel} 执行一次（每天首次回补最近 ${status.lookbackDays ?? 7} 天，其余同步今天）。`);
     if (status.path) console.log(`配置: ${status.path}`);
     console.log(`日志: ~/.aiusage/sync.log`);
   } else if (sub === 'off') {
@@ -739,10 +760,16 @@ async function runSchedule(sub: string | undefined, flags: Record<string, string
     if (status.enabled) {
       console.log(`状态: 已启用`);
       if (status.intervalLabel) console.log(`间隔: 每 ${status.intervalLabel}`);
-      console.log(`含今日: ${status.includeToday ? '是' : '否'}`);
+      if (status.lookbackDays) console.log(`回补窗口: 最近 ${status.lookbackDays} 天 + 今天`);
+      else console.log(`含今日: ${status.includeToday ? '是' : '否'}`);
+      if (status.runAtLoad !== undefined) console.log(`登录时运行: ${status.runAtLoad ? '是' : '否'}`);
       if (status.command) console.log(`命令: ${status.command}`);
       if (status.path) console.log(`配置: ${status.path}`);
       if (status.logPath) console.log(`日志: ${status.logPath}`);
+    } else if (status.installed) {
+      console.log('状态: 配置存在，但服务未加载');
+      if (status.path) console.log(`配置: ${status.path}`);
+      console.log('修复: aiusage schedule on [--every 5m]');
     } else {
       console.log('状态: 未启用');
       console.log('启用: aiusage schedule on [--every 5m]');

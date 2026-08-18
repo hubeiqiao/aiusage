@@ -218,7 +218,11 @@ aiusage schedule off            # 关闭
 aiusage schedule status         # 查看当前状态
 ```
 
-支持间隔：`5m` – `1d`。定时同步始终包含今日实时数据，确保看板数据及时更新。
+支持间隔：`5m` – `1d`。Linux 支持不超过一小时且能整除 60 的分钟间隔、能整除 24 的整小时间隔，或 `1d`；其他值会明确报错，不会静默改变频率。每天本地时间的首次定时同步会按单日请求分批上传过去 7 天及今天（`--lookback 7`），当天后续任务只扫描今天；操作系统级单实例锁会避免任务重叠。服务端会按日期 upsert，重复上传安全；电脑离线后，下一次运行会自动补齐最近的断档。
+
+在 macOS 上，LaunchAgent 加载时会立即运行一次；能被日历准确表达的间隔使用日历触发，否则使用精确的 `StartInterval`。`aiusage schedule status` 会检查服务是否真的已加载，而不只是检查 plist 文件是否存在。
+
+如果 macOS 重启后显示 plist 存在但服务未加载，请打开 **系统设置 → 通用 → 登录项与扩展 → App Background Activity**，启用 `lockf`，然后执行 `aiusage schedule on --every 30m`。最后用 `aiusage schedule status` 和 `aiusage doctor` 确认恢复。
 
 ### doctor
 

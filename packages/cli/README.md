@@ -219,7 +219,11 @@ aiusage schedule off        # disable
 aiusage schedule status     # show current status
 ```
 
-Supported intervals: `5m` – `1d`. Scheduled sync always includes today's live data (`--today`), so your dashboard stays current.
+Supported intervals: `5m` – `1d`. On Linux, supported values are minute intervals up to one hour that divide 60, whole-hour intervals that divide 24, or `1d`; other values are rejected instead of silently changing the frequency. The first scheduled run each local day uploads the previous 7 days plus today (`--lookback 7`) in one-day request batches; later runs that day scan only today. An OS-backed single-instance lock prevents overlapping runs. Repeated uploads are safe because the server upserts each date, and a machine that was offline can automatically fill recent gaps on its next run.
+
+On macOS, the LaunchAgent runs once when loaded and then uses calendar triggers when the interval can be represented evenly, otherwise an exact `StartInterval`. `aiusage schedule status` verifies that the service is actually loaded, rather than only checking that its plist exists.
+
+If macOS shows the plist but reports the service as not loaded after a restart, open **System Settings → General → Login Items & Extensions → App Background Activity**, enable the `lockf` item, then run `aiusage schedule on --every 30m`. Confirm recovery with `aiusage schedule status` and `aiusage doctor`.
 
 ### doctor
 

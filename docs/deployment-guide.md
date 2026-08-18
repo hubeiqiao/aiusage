@@ -137,15 +137,19 @@ aiusage enroll \
 ### Sync data
 
 ```bash
-aiusage sync --today
+aiusage sync --lookback 7
 ```
 
 ### Enable auto-sync
 
 ```bash
-aiusage schedule          # default: every 5 minutes
+aiusage schedule          # default: every 5 minutes; backfills 7 days + today
 aiusage schedule on --every 1h   # custom interval
 ```
+
+The first scheduled run each local day uploads the previous 7 days plus today; later runs that day scan only today. Runs use an OS-backed single-instance lock and therefore recover recent gaps after the machine comes back online without overlapping. On Linux, use a minute interval up to one hour that divides 60, a whole-hour interval that divides 24, or `1d`; other cron intervals are rejected.
+
+On macOS, if the plist exists but the service is not loaded after restart, enable `lockf` under **System Settings → General → Login Items & Extensions → App Background Activity**, rerun `aiusage schedule on --every 30m`, and verify with `aiusage schedule status` plus `aiusage doctor`.
 
 ### Verify
 
