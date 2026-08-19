@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const mockHomedir = vi.fn();
+const mockReadConfig = vi.fn();
 
 vi.mock('node:os', async () => {
   const actual = await vi.importActual<typeof import('node:os')>('node:os');
@@ -14,7 +15,7 @@ vi.mock('node:os', async () => {
 });
 
 vi.mock('../config.js', () => ({
-  readConfig: async () => ({ deviceId: 'dev-1', targets: [] }),
+  readConfig: () => mockReadConfig(),
   getConfigPath: () => '/tmp/aiusage-test-config.json',
 }));
 
@@ -31,6 +32,7 @@ let homeDir: string;
 beforeEach(async () => {
   homeDir = join(tmpdir(), `aiusage-doctor-${Date.now()}`);
   mockHomedir.mockReturnValue(homeDir);
+  mockReadConfig.mockResolvedValue({ deviceId: 'dev-1', targets: [] });
   await mkdir(homeDir, { recursive: true });
   await writeFile('/tmp/aiusage-test-config.json', '{}');
 });
@@ -103,5 +105,49 @@ describe('runDoctor', () => {
         message: '1 database(s), 0 legacy message(s) found',
       }),
     );
+  });
+
+  it('warns when the last successful upload is more than 24 hours old', async () => {
+    mockReadConfig.mockResolvedValue({
+      deviceId: 'dev-1',
+      targets: [{
+        name: 'cloud',
+        apiBaseUrl: 'https://example.test',
+        deviceToken: 'dtok_test_value',
+        lastSuccessfulUploadAt: '2000-01-01T00:00:00.000Z',
+      }],
+    });
+
+    const { runDoctor } = await import('../doctor.js');
+    const checks = await runDoctor('en');
+
+    expect(checks).toContainEqual({
+      group: 'Sync Targets',
+      name: '[cloud] Last sync',
+      status: 'warn',
+      message: '2000-01-01T00:00:00.000Z (stale: more than 24h ago)',
+    });
+  });
+
+  it('warns when the last successful upload timestamp is invalid', async () => {
+    mockReadConfig.mockResolvedValue({
+      deviceId: 'dev-1',
+      targets: [{
+        name: 'cloud',
+        apiBaseUrl: 'https://example.test',
+        deviceToken: 'dtok_test_value',
+        lastSuccessfulUploadAt: 'not-a-date',
+      }],
+    });
+
+    const { runDoctor } = await import('../doctor.js');
+    const checks = await runDoctor('en');
+
+    expect(checks).toContainEqual({
+      group: 'Sync Targets',
+      name: '[cloud] Last sync',
+      status: 'warn',
+      message: 'not-a-date (invalid timestamp)',
+    });
   });
 });

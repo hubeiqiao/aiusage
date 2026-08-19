@@ -33,6 +33,8 @@ const msgs = {
     server: 'Server',
     lastSync: 'Last sync',
     lastSyncNone: 'No record',
+    lastSyncStale: (value: string) => `${value} (stale: more than 24h ago)`,
+    lastSyncInvalid: (value: string) => `${value} (invalid timestamp)`,
     notInstalled: 'Not installed',
     installedNoData: 'Installed, no usage data yet',
     hasData: (n: number) => `${n} session${n > 1 ? 's' : ''} found`,
@@ -59,6 +61,8 @@ const msgs = {
     server: '服务端',
     lastSync: '上次同步',
     lastSyncNone: '暂无记录',
+    lastSyncStale: (value: string) => `${value}（已超过 24 小时）`,
+    lastSyncInvalid: (value: string) => `${value}（时间格式无效）`,
     notInstalled: '未安装',
     installedNoData: '已安装，暂无使用数据',
     hasData: (n: number) => `发现 ${n} 个会话`,
@@ -147,7 +151,17 @@ export async function runDoctor(lang: Lang = 'zh'): Promise<Check[]> {
       }
 
       if (target.lastSuccessfulUploadAt) {
-        checks.push({ group: g2, name: `${prefix} ${s.lastSync}`, status: 'ok', message: target.lastSuccessfulUploadAt });
+        const freshness = uploadFreshness(target.lastSuccessfulUploadAt, 24 * 60 * 60 * 1000);
+        checks.push({
+          group: g2,
+          name: `${prefix} ${s.lastSync}`,
+          status: freshness === 'fresh' ? 'ok' : 'warn',
+          message: freshness === 'invalid'
+            ? s.lastSyncInvalid(target.lastSuccessfulUploadAt)
+            : freshness === 'stale'
+              ? s.lastSyncStale(target.lastSuccessfulUploadAt)
+              : target.lastSuccessfulUploadAt,
+        });
       } else {
         checks.push({ group: g2, name: `${prefix} ${s.lastSync}`, status: 'warn', message: s.lastSyncNone });
       }
@@ -265,4 +279,10 @@ export async function runDoctor(lang: Lang = 'zh'): Promise<Check[]> {
   }
 
   return checks;
+}
+
+function uploadFreshness(value: string, maxAgeMs: number): 'fresh' | 'stale' | 'invalid' {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return 'invalid';
+  return Date.now() - timestamp > maxAgeMs ? 'stale' : 'fresh';
 }
