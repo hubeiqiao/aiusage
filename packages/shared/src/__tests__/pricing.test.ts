@@ -41,6 +41,7 @@ describe('calculateCost — 关键模型', () => {
   };
 
   it.each([
+    ['anthropic', 'claude-code', 'claude-fable-5-1', 60], // 10 + 50
     ['anthropic', 'claude-code', 'claude-fable-5', 60], // 10 + 50
     ['anthropic', 'claude-code', 'claude-mythos-5', 60], // 10 + 50
     ['anthropic', 'claude-code', 'claude-opus-5', 30], // 5 + 25

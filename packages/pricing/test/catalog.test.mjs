@@ -11,6 +11,8 @@ test('catalog.json exposes the public pricing catalog', async () => {
   assert.ok(catalog.providers?.anthropic?.['claude-code']);
   assert.equal(catalog.aliases?.['gpt-5.6'], 'gpt-5.6-sol');
   assert.equal(catalog.aliases?.['claude-fibre-5'], 'claude-fable-5');
+  assert.equal(catalog.providers.anthropic['claude-code'].models['claude-fable-5-1']?.input_per_million, 10);
+  assert.equal(catalog.providers.anthropic['claude-code'].models['claude-fable-5-1']?.cached_input_per_million, 0.25);
   assert.equal(catalog.providers.anthropic['claude-code'].models['claude-fable-5']?.input_per_million, 10);
   assert.equal(catalog.providers.anthropic['claude-code'].models['claude-opus-5']?.output_per_million, 25);
   assert.equal(catalog.providers.anthropic['claude-code'].models['claude-sonnet-5']?.input_per_million, 2);

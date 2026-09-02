@@ -3,11 +3,19 @@ import type { ProductPricing } from '../types.js';
 /**
  * Anthropic Claude（含 Claude Code CLI）。
  * 单价 USD / 1M tokens。来源：https://platform.claude.com/docs/en/about-claude/pricing
- * 最近核对：2026-07-26
+ * 最近核对：2026-09-01
  */
 export const anthropic: Record<string, ProductPricing> = {
   'claude-code': {
     models: {
+      'claude-fable-5-1': {
+        currency: 'USD',
+        input_per_million: 10,
+        output_per_million: 50,
+        cache_write_5m_per_million: 12.5,
+        cache_write_1h_per_million: 20,
+        cached_input_per_million: 0.25,
+      },
       'claude-fable-5': {
         currency: 'USD',
         input_per_million: 10,
