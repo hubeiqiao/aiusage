@@ -25,6 +25,7 @@ const aliases: Record<string, string> = {
   'claude-opus-4-6-20250301': 'claude-opus-4-6',
   'claude-haiku-4-5-20251001': 'claude-haiku-4-5',
   'claude-sonnet-4.6': 'claude-sonnet-4-6',
+  'gpt-6': 'gpt-6-astra',
   'gpt-5.6': 'gpt-5.6-sol',
   'codex-auto-review': 'gpt-5.4',
   'k3': 'kimi-k3',
