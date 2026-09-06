@@ -101,6 +101,11 @@ jobs:
 
       - name: Publish packages (if versions are new)
         run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "NPM_TOKEN 未配置，跳过 npm publish。"
+            exit 0
+          fi
+
           publish_if_new() {
             local pkg_dir="$1"
             local allow_first_publish="${2:-true}"
