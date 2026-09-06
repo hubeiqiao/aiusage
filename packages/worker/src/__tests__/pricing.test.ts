@@ -37,11 +37,11 @@ describe('calculateCost: 基本计费', () => {
       cacheWriteTokens: 0,
       outputTokens: 20_000,
       reasoningOutputTokens: 0,
-      costUSD: 5.25,
+      costUSD: 4.1,
       pricingVersion: getPricingCatalog().version,
     });
 
-    expect(result.estimatedCostUsd).toBe(5.25);
+    expect(result.estimatedCostUsd).toBe(4.1);
     expect(result.costStatus).toBe('exact');
   });
 
@@ -58,11 +58,11 @@ describe('calculateCost: 基本计费', () => {
       cacheWriteTokens: 0,
       outputTokens: 20_000,
       reasoningOutputTokens: 0,
-      costUSD: 5.25,
+      costUSD: 4.1,
       pricingVersion: 'stale-catalog',
     });
 
-    expect(result.estimatedCostUsd).toBe(3.1);
+    expect(result.estimatedCostUsd).toBe(2.4);
     expect(result.costStatus).toBe('estimated');
   });
 
@@ -124,7 +124,7 @@ describe('calculateCost: 基本计费', () => {
       costUSD: 0,
     });
 
-    expect(result.estimatedCostUsd).toBe(2.6);
+    expect(result.estimatedCostUsd).toBe(2);
     expect(result.costStatus).toBe('estimated');
   });
 
@@ -260,15 +260,15 @@ describe('calculateCost: 基本计费', () => {
 
   it('Codex gpt-5.6-sol 基本 input/output 计费', () => {
     // 2M input（含 cached）已超过 272K 长上下文阈值，整个请求按高档计费：
-    // input=$10/M, cached input=$1/M, output=$45/M
+    // input=$8/M, cached input=$0.8/M, output=$30/M
     const result = calculateCost('openai', 'codex', 'gpt-5.6-sol', {
       inputTokens: 1_000_000,
       cachedInputTokens: 1_000_000,
       cacheWriteTokens: 0,
       outputTokens: 500_000,
     });
-    // 1*10 + 1*1 + 0.5*45 = $33.5
-    expect(result.estimatedCostUsd).toBe(33.5);
+    // 1*8 + 1*0.8 + 0.5*30 = $23.8
+    expect(result.estimatedCostUsd).toBe(23.8);
     expect(result.costStatus).toBe('exact');
   });
 
@@ -287,22 +287,22 @@ describe('calculateCost: 基本计费', () => {
       },
       { requestCount: 10 },
     );
-    // 1*5 + 1*0.5 + 0.5*30 = $20.5
-    expect(result.estimatedCostUsd).toBe(20.5);
+    // 1*4 + 1*0.4 + 0.5*20 = $14.4
+    expect(result.estimatedCostUsd).toBe(14.4);
     // 按平均单请求 input 推断阶梯属于估算，故标记 estimated
     expect(result.costStatus).toBe('estimated');
   });
 
   it('Codex gpt-5.6-luna 使用低档单价计费', () => {
-    // 2M input 超过 272K 阈值 → 高档：input=$2/M, cached=$0.2/M, output=$9/M
+    // 2M input 超过 272K 阈值 → 高档：input=$0.4/M, cached=$0.04/M, output=$1.8/M
     const result = calculateCost('openai', 'codex', 'gpt-5.6-luna', {
       inputTokens: 1_000_000,
       cachedInputTokens: 1_000_000,
       cacheWriteTokens: 0,
       outputTokens: 500_000,
     });
-    // 1*2 + 1*0.2 + 0.5*9 = $6.7
-    expect(result.estimatedCostUsd).toBe(6.7);
+    // 1*0.4 + 1*0.04 + 0.5*1.8 = $1.34
+    expect(result.estimatedCostUsd).toBe(1.34);
     expect(result.costStatus).toBe('exact');
   });
 });
