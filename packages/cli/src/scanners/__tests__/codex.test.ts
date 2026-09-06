@@ -149,12 +149,28 @@ describe('Codex tiered pricing', () => {
     expect(result.eventCount).toBe(2);
     expect(result.inputTokens).toBe(500_000);
     expect(result.outputTokens).toBe(20_000);
-    expect(result.costUSD).toBeCloseTo(5.25, 4);
+    expect(result.costUSD).toBeCloseTo(4.1, 4);
     expect(result.pricingVersion).toBe(PRICING_VERSION);
   });
 });
 
 describe('Codex service tier', () => {
+  it('adds fast suffix for GPT-6 Astra Codex usage', async () => {
+    const day = '2026-09-05';
+    await writeFile(join(tmpDir, 'config.toml'), 'service_tier = "fast"\n');
+    const sessionDir = join(tmpDir, 'sessions', '2026', '09', '05');
+    const events = tokenCountEvent(
+      `${day}T10:00:00.000Z`,
+      { input: 10_000, cached: 8_000, output: 500 },
+      { input: 10_000, cached: 8_000, output: 500 },
+      'gpt-6-astra',
+    );
+    await writeSession(sessionDir, 'rollout-test.jsonl', events);
+
+    const [result] = await scanCodex(day, tmpDir);
+    expect(result.model).toBe('gpt-6-astra-fast');
+  });
+
   it('adds priority suffix for GPT-5.6 Codex usage', async () => {
     const day = '2026-07-10';
     await writeFile(join(tmpDir, 'config.toml'), 'service_tier = "priority"\n');

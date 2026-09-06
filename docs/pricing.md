@@ -40,7 +40,7 @@ packages/shared/src/pricing/
 | `currency: 'USD' \| 'CNY'` | 价格币种。Worker 端结算时按 `catalog.fx` 折算到 USD |
 | `input_per_million` / `output_per_million` | 基础单价 / 1M tokens |
 | `cached_input_per_million` | cache hit 价（Anthropic 叫 cache_read，Kimi 叫缓存命中） |
-| `cache_write_per_million` | 不区分缓存时长的通用 cache write 价（如 OpenAI GPT-5.6；Kimi 的缓存未命中按普通输入价） |
+| `cache_write_per_million` | 不区分缓存时长的通用 cache write 价（如 OpenAI GPT-6 / GPT-5.6；Kimi 的缓存未命中按普通输入价） |
 | `cache_write_5m_per_million` / `cache_write_1h_per_million` | Anthropic 风格 prompt caching write |
 | `tiers?: PricingTier[]` | 阶梯定价：按 input token 数命中不同档位（Qwen / Gemini 2.5 Pro / GLM 等） |
 | `effective_from` / `effective_to` | 价格生效区间（审计用） |
@@ -79,7 +79,7 @@ Worker 启动时可通过 env 覆盖（暂未实现，规划中）。
 模型名后缀 `-fast` / `-priority` 会先剥离为基础模型，再按 provider/product 应用倍率：
 
 - Anthropic：`claude-opus-5-fast` 与 `claude-opus-4-8-fast` 按官方 fast mode 价折算为 `2x`；`claude-opus-4-7-fast` 只保留历史日志重算的 `6x`；`claude-opus-4-6-fast` 现按标准价
-- OpenAI Codex：`-priority` / 部分 `-fast` 按 Codex speed/API priority 口径处理
+- OpenAI Codex：`gpt-6-astra-fast` / `-priority` 按 Fast mode `2x` 处理；其他型号继续使用各自的已登记倍率
 
 ## 阶梯定价
 
