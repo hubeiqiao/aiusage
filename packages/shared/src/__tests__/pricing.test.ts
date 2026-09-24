@@ -44,12 +44,15 @@ describe('calculateCost — 关键模型', () => {
     ['anthropic', 'claude-code', 'claude-fable-5-1', 60], // 10 + 50
     ['anthropic', 'claude-code', 'claude-fable-5', 60], // 10 + 50
     ['anthropic', 'claude-code', 'claude-mythos-5', 60], // 10 + 50
+    ['anthropic', 'claude-code', 'claude-opus-5-5', 24], // 4 + 20
     ['anthropic', 'claude-code', 'claude-opus-5', 30], // 5 + 25
     ['anthropic', 'claude-code', 'claude-opus-4-8', 30], // 5 + 25
     ['anthropic', 'claude-code', 'claude-opus-4-7', 30], // 5 + 25
     ['anthropic', 'claude-code', 'claude-sonnet-5', 12], // 2 + 10（intro through 2026-08-31）
     ['anthropic', 'claude-code', 'claude-sonnet-4-6', 18],
     ['openai', 'codex', 'gpt-6-astra', 95], // 长上下文：20 + 75
+    ['openai', 'codex', 'gpt-6-sol', 19], // 长上下文：4 + 15
+    ['openai', 'codex', 'gpt-6-luna', 0.95], // 长上下文：0.2 + 0.75
     ['openai', 'codex', 'gpt-5.6-sol', 38], // 长上下文：8 + 30
     ['openai', 'codex', 'gpt-5.6-terra', 22], // 长上下文：4 + 18
     ['openai', 'codex', 'gpt-5.6-luna', 2.2], // 长上下文：0.4 + 1.8
@@ -148,6 +151,12 @@ describe('Fast 模式白名单', () => {
     outputTokens: 1_000_000,
   };
 
+  it('Opus 5.5-fast 应 ×2', () => {
+    const fast = calculateCost('anthropic', 'claude-code', 'claude-opus-5-5-fast', tokens);
+    const normal = calculateCost('anthropic', 'claude-code', 'claude-opus-5-5', tokens);
+    expect(fast.estimatedCostUsd).toBeCloseTo(normal.estimatedCostUsd * 2, 3);
+  });
+
   it('Opus 5-fast 应 ×2', () => {
     const fast = calculateCost('anthropic', 'claude-code', 'claude-opus-5-fast', tokens);
     const normal = calculateCost('anthropic', 'claude-code', 'claude-opus-5', tokens);
@@ -205,6 +214,12 @@ describe('Fast 模式白名单', () => {
   it('Codex GPT-6 Astra fast 应 ×2', () => {
     const fast = calculateCost('openai', 'codex', 'gpt-6-astra-fast', tokens);
     const normal = calculateCost('openai', 'codex', 'gpt-6-astra', tokens);
+    expect(fast.estimatedCostUsd).toBeCloseTo(normal.estimatedCostUsd * 2, 3);
+  });
+
+  it.each(['gpt-6-sol', 'gpt-6-luna'])('Codex %s fast 应 ×2', (model) => {
+    const fast = calculateCost('openai', 'codex', `${model}-fast`, tokens);
+    const normal = calculateCost('openai', 'codex', model, tokens);
     expect(fast.estimatedCostUsd).toBeCloseTo(normal.estimatedCostUsd * 2, 3);
   });
 
@@ -306,6 +321,47 @@ describe('阶梯定价', () => {
     });
     expect(r.matchedTierIndex).toBe(1);
     expect(r.estimatedCostUsd).toBeCloseTo(13.5, 4);
+  });
+
+  it('GPT-6 Sol 精确区分缓存读写并命中短上下文价格', () => {
+    const r = calculateCost('openai', 'codex', 'gpt-6-sol', {
+      inputTokens: 10_000,
+      cachedInputTokens: 60_000,
+      cacheWriteTokens: 30_000,
+      outputTokens: 10_000,
+    });
+    // 0.01*$2 + 0.06*$0.2 + 0.03*$2.5 + 0.01*$10 = $0.207
+    expect(r.resolvedModel).toBe('gpt-6-sol');
+    expect(r.matchedTierIndex).toBe(0);
+    expect(r.costStatus).toBe('exact');
+    expect(r.estimatedCostUsd).toBeCloseTo(0.207, 4);
+  });
+
+  it('GPT-6 Luna 超过 272K input 后整次请求命中长上下文价格', () => {
+    const r = calculateCost('openai', 'codex', 'gpt-6-luna', {
+      inputTokens: 300_000,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 100_000,
+    });
+    // 0.3*$0.2 + 0.1*$0.75 = $0.135
+    expect(r.matchedTierIndex).toBe(1);
+    expect(r.estimatedCostUsd).toBeCloseTo(0.135, 4);
+  });
+
+  it('Claude Opus 5.5 缓存读按 0.05x、缓存写按 5m/1h 分开计价', () => {
+    const r = calculateCost('anthropic', 'claude-code', 'claude-opus-5-5', {
+      inputTokens: 100_000,
+      cachedInputTokens: 100_000,
+      cacheWriteTokens: 100_000,
+      cacheWrite5mTokens: 60_000,
+      cacheWrite1hTokens: 40_000,
+      outputTokens: 10_000,
+    });
+    // 0.1*$4 + 0.1*$0.2 + 0.06*$5 + 0.04*$8 + 0.01*$20 = $1.24
+    expect(r.resolvedModel).toBe('claude-opus-5-5');
+    expect(r.costStatus).toBe('exact');
+    expect(r.estimatedCostUsd).toBeCloseTo(1.24, 4);
   });
 
   it('Claude Fable 5.1 缓存读写使用独立价格', () => {

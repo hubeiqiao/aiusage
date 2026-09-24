@@ -78,8 +78,8 @@ Worker 启动时可通过 env 覆盖（暂未实现，规划中）。
 
 模型名后缀 `-fast` / `-priority` 会先剥离为基础模型，再按 provider/product 应用倍率：
 
-- Anthropic：`claude-opus-5-fast` 与 `claude-opus-4-8-fast` 按官方 fast mode 价折算为 `2x`；`claude-opus-4-7-fast` 只保留历史日志重算的 `6x`；`claude-opus-4-6-fast` 现按标准价
-- OpenAI Codex：`gpt-6-astra-fast` / `-priority` 按 Fast mode `2x` 处理；其他型号继续使用各自的已登记倍率
+- Anthropic：`claude-opus-5-5-fast`、`claude-opus-5-fast` 与 `claude-opus-4-8-fast` 按官方 fast mode 价折算为 `2x`；`claude-opus-4-7-fast` 只保留历史日志重算的 `6x`；`claude-opus-4-6-fast` 现按标准价
+- OpenAI Codex：`gpt-6-astra` / `gpt-6-sol` / `gpt-6-luna` 的 `-fast` / `-priority` 按 Fast mode `2x` 处理；其他型号继续使用各自的已登记倍率
 
 ## 阶梯定价
 
