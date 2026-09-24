@@ -15,6 +15,7 @@ import { catalog as defaultCatalog } from './catalog.js';
  * OpenAI Codex 的 fast/priority 倍率另按官方 Codex speed/API priority 口径处理。
  */
 const ANTHROPIC_FAST_MULTIPLIERS: Record<string, number> = {
+  'claude-opus-5-5': 2,
   'claude-opus-5': 2,
   'claude-opus-4-8': 2,
   'claude-opus-4-7': 6,
@@ -24,6 +25,8 @@ type ServiceTierSuffix = 'fast' | 'priority' | null;
 
 const OPENAI_CODEX_TIER_MULTIPLIERS: Record<string, number> = {
   'gpt-6-astra': 2,
+  'gpt-6-sol': 2,
+  'gpt-6-luna': 2,
   'gpt-5.6-sol': 2,
   'gpt-5.6-terra': 2,
   'gpt-5.6-luna': 2,

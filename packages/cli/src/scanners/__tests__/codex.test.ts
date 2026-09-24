@@ -171,6 +171,22 @@ describe('Codex service tier', () => {
     expect(result.model).toBe('gpt-6-astra-fast');
   });
 
+  it.each(['gpt-6-sol', 'gpt-6-luna'])('adds fast suffix for %s Codex usage', async (model) => {
+    const day = '2026-09-20';
+    await writeFile(join(tmpDir, 'config.toml'), 'service_tier = "fast"\n');
+    const sessionDir = join(tmpDir, 'sessions', '2026', '09', '20');
+    const events = tokenCountEvent(
+      `${day}T12:00:00.000Z`,
+      { input: 10_000, cached: 8_000, output: 500 },
+      { input: 10_000, cached: 8_000, output: 500 },
+      model,
+    );
+    await writeSession(sessionDir, 'rollout-test.jsonl', events);
+
+    const [result] = await scanCodex(day, tmpDir);
+    expect(result.model).toBe(`${model}-fast`);
+  });
+
   it('adds priority suffix for GPT-5.6 Codex usage', async () => {
     const day = '2026-07-10';
     await writeFile(join(tmpDir, 'config.toml'), 'service_tier = "priority"\n');

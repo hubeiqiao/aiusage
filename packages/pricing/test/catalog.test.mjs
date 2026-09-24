@@ -18,6 +18,10 @@ test('catalog.json exposes the public pricing catalog', async () => {
   assert.equal(catalog.providers.anthropic['claude-code'].models['claude-sonnet-5']?.input_per_million, 2);
   assert.equal(catalog.providers.openai.codex.models['gpt-6-astra']?.input_per_million, 10);
   assert.equal(catalog.providers.openai.codex.models['gpt-6-astra']?.tiers?.[1]?.output_per_million, 75);
+  assert.equal(catalog.providers.openai.codex.models['gpt-6-sol']?.input_per_million, 2);
+  assert.equal(catalog.providers.openai.codex.models['gpt-6-sol']?.tiers?.[1]?.output_per_million, 15);
+  assert.equal(catalog.providers.openai.codex.models['gpt-6-luna']?.input_per_million, 0.1);
+  assert.equal(catalog.providers.anthropic['claude-code'].models['claude-opus-5-5']?.cached_input_per_million, 0.2);
   assert.equal(catalog.providers.openai.codex.models['gpt-5.6-sol']?.input_per_million, 4);
   assert.equal(catalog.providers.openai.codex.models['gpt-5.6-terra']?.input_per_million, 2);
   assert.equal(catalog.providers.openai.codex.models['gpt-5.6-luna']?.input_per_million, 0.2);

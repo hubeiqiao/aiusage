@@ -4,8 +4,10 @@ import type { ProductPricing } from '../types.js';
  * OpenAI（Codex / GPT 系列）。
  * 单价 USD / 1M tokens。来源：
  * - https://developers.openai.com/api/docs/models/gpt-6-astra
+ * - https://developers.openai.com/api/docs/models/gpt-6-sol
+ * - https://developers.openai.com/api/docs/models/gpt-6-luna
  * - https://developers.openai.com/api/docs/models/gpt-5.6-sol
- * 最近核对：2026-09-05
+ * 最近核对：2026-09-24
  *
  * 注意：deep-research 与 computer-use 此前在 worker/cli 表里写高了 2 倍，本次已校正。
  */
@@ -33,6 +35,52 @@ export const openai: Record<string, ProductPricing> = {
             cached_input_per_million: 2,
             cache_write_per_million: 25,
             output_per_million: 75,
+          },
+        ],
+      },
+      'gpt-6-sol': {
+        currency: 'USD',
+        notes: 'prompts over 272K input tokens bill the full request at long-context rates',
+        input_per_million: 2,
+        cached_input_per_million: 0.2,
+        cache_write_per_million: 2.5,
+        output_per_million: 10,
+        tiers: [
+          {
+            threshold: 272_000,
+            input_per_million: 2,
+            cached_input_per_million: 0.2,
+            cache_write_per_million: 2.5,
+            output_per_million: 10,
+          },
+          {
+            input_per_million: 4,
+            cached_input_per_million: 0.4,
+            cache_write_per_million: 5,
+            output_per_million: 15,
+          },
+        ],
+      },
+      'gpt-6-luna': {
+        currency: 'USD',
+        notes: 'prompts over 272K input tokens bill the full request at long-context rates',
+        input_per_million: 0.1,
+        cached_input_per_million: 0.01,
+        cache_write_per_million: 0.125,
+        output_per_million: 0.5,
+        tiers: [
+          {
+            threshold: 272_000,
+            input_per_million: 0.1,
+            cached_input_per_million: 0.01,
+            cache_write_per_million: 0.125,
+            output_per_million: 0.5,
+          },
+          {
+            input_per_million: 0.2,
+            cached_input_per_million: 0.02,
+            cache_write_per_million: 0.25,
+            output_per_million: 0.75,
           },
         ],
       },
