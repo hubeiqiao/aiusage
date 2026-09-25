@@ -113,9 +113,7 @@ CLI 扫描器位于 `packages/cli/src/scanners/`，每个 AI 工具一个文件�
 
 ### Dashboard + Worker
 
-CI 自动部署（push to main）：Dashboard 构建 → 静态资源复制到 worker/public/ → wrangler deploy。
-
-需要的 GitHub Secrets：`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`。
+由 Cloudflare Workers Builds（git 集成）在 push to main 时自动构建并部署，GitHub Actions 不再重复部署。数据库迁移仍按上文手动执行。
 
 ### CLI 发布
 
