@@ -77,9 +77,11 @@ export async function assertJoeDeployGuard({
     },
   ];
 
-  const checkedContents = await Promise.all(
-    checks.map((check) => assertFileIncludes({ repoRoot, ...check })),
-  );
+  // 按顺序检查：Promise.all 会以最先 reject 的为准，多项同时不满足时报错不确定。
+  const checkedContents = [];
+  for (const check of checks) {
+    checkedContents.push(await assertFileIncludes({ repoRoot, ...check }));
+  }
 
   for (const content of checkedContents) {
     if (content.includes('<title>Token Usage</title>')) {
