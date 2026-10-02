@@ -674,6 +674,7 @@ function applyCodexServiceTier(model: string, serviceTier: CodexServiceTier): st
   if (model.endsWith('-fast') || model.endsWith('-priority')) return model;
   const supportsFast =
     model === 'gpt-6-astra' ||
+    model === 'gpt-6.1-sol' ||
     model === 'gpt-6-sol' ||
     model === 'gpt-6-luna' ||
     model === 'gpt-5.5' ||

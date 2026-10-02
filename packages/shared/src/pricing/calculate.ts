@@ -25,6 +25,7 @@ type ServiceTierSuffix = 'fast' | 'priority' | null;
 
 const OPENAI_CODEX_TIER_MULTIPLIERS: Record<string, number> = {
   'gpt-6-astra': 2,
+  'gpt-6.1-sol': 2,
   'gpt-6-sol': 2,
   'gpt-6-luna': 2,
   'gpt-5.6-sol': 2,
