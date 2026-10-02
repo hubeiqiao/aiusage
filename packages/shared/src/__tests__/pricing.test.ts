@@ -217,7 +217,7 @@ describe('Fast 模式白名单', () => {
     expect(fast.estimatedCostUsd).toBeCloseTo(normal.estimatedCostUsd * 2, 3);
   });
 
-  it.each(['gpt-6-sol', 'gpt-6-luna'])('Codex %s fast 应 ×2', (model) => {
+  it.each(['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna'])('Codex %s fast 应 ×2', (model) => {
     const fast = calculateCost('openai', 'codex', `${model}-fast`, tokens);
     const normal = calculateCost('openai', 'codex', model, tokens);
     expect(fast.estimatedCostUsd).toBeCloseTo(normal.estimatedCostUsd * 2, 3);
@@ -321,6 +321,22 @@ describe('阶梯定价', () => {
     });
     expect(r.matchedTierIndex).toBe(1);
     expect(r.estimatedCostUsd).toBeCloseTo(13.5, 4);
+  });
+
+  it.each([
+    [182_000, 0, 0.545],
+    [182_001, 1, 1.04],
+  ])('GPT-6.1 Sol 在 %i input 边界使用正确阶梯和缓存价格', (inputTokens, tier, cost) => {
+    const r = calculateCost('openai', 'codex', 'gpt-6.1-sol', {
+      inputTokens,
+      cachedInputTokens: 60_000,
+      cacheWriteTokens: 30_000,
+      outputTokens: 10_000,
+    });
+    expect(r.resolvedModel).toBe('gpt-6.1-sol');
+    expect(r.matchedTierIndex).toBe(tier);
+    expect(r.costStatus).toBe('exact');
+    expect(r.estimatedCostUsd).toBeCloseTo(cost, 6);
   });
 
   it('GPT-6 Sol 精确区分缓存读写并命中短上下文价格', () => {
