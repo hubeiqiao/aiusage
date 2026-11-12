@@ -15,6 +15,7 @@ import { catalog as defaultCatalog } from './catalog.js';
  * OpenAI Codex 的 fast/priority 倍率另按官方 Codex speed/API priority 口径处理。
  */
 const ANTHROPIC_FAST_MULTIPLIERS: Record<string, number> = {
+  'claude-fable-5-2': 2,
   'claude-opus-5-5': 2,
   'claude-opus-5': 2,
   'claude-opus-4-8': 2,
