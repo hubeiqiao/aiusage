@@ -8,6 +8,16 @@ import type { ProductPricing } from '../types.js';
 export const anthropic: Record<string, ProductPricing> = {
   'claude-code': {
     models: {
+      // Verified 2026-11-11 against https://platform.claude.com/docs/en/models/fable-5-2/overview
+      'claude-fable-5-2': {
+        currency: 'USD',
+        effective_from: '2026-11-09',
+        input_per_million: 8,
+        output_per_million: 40,
+        cache_write_5m_per_million: 10,
+        cache_write_1h_per_million: 16,
+        cached_input_per_million: 0.2,
+      },
       'claude-fable-5-1': {
         currency: 'USD',
         effective_from: '2026-09-01',

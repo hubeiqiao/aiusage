@@ -10,7 +10,7 @@ import { github } from './data/github.js';
 import { sourcegraph } from './data/sourcegraph.js';
 import { inflection, cursor, droid, opencode } from './data/placeholders.js';
 
-export const PRICING_VERSION = '2026-10-02-gpt-6-1-sol-v1';
+export const PRICING_VERSION = '2026-11-11-fable-5-2-v1';
 
 /**
  * 模型别名（精确匹配优先于前缀回退）。

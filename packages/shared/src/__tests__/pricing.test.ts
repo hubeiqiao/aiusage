@@ -380,8 +380,12 @@ describe('阶梯定价', () => {
     expect(r.estimatedCostUsd).toBeCloseTo(1.24, 4);
   });
 
-  it('Claude Fable 5.1 缓存读写使用独立价格', () => {
-    const r = calculateCost('anthropic', 'claude-code', 'claude-fable-5-1', {
+  it.each([
+    ['claude-fable-5-1', 3.075],
+    ['claude-fable-5-2', 2.46],
+    ['claude-fable-5-2-fast', 4.92],
+  ])('%s uses its input, output, and cache rates', (model, expectedCost) => {
+    const r = calculateCost('anthropic', 'claude-code', model, {
       inputTokens: 100_000,
       cachedInputTokens: 100_000,
       cacheWriteTokens: 100_000,
@@ -389,7 +393,8 @@ describe('阶梯定价', () => {
       cacheWrite1hTokens: 40_000,
       outputTokens: 10_000,
     });
-    expect(r.estimatedCostUsd).toBeCloseTo(3.075, 4);
+    expect(r.costStatus).toBe('exact');
+    expect(r.estimatedCostUsd).toBeCloseTo(expectedCost, 4);
   });
 
   it('GPT-5.6 Sol 超过 272K input 后整次请求命中长上下文价格', () => {
