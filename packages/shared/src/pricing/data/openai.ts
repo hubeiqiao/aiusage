@@ -39,6 +39,31 @@ export const openai: Record<string, ProductPricing> = {
           },
         ],
       },
+      // Verified 2026-11-17 against https://developers.openai.com/api/docs/models/gpt-6.2-sol
+      'gpt-6.2-sol': {
+        currency: 'USD',
+        effective_from: '2026-11-17',
+        notes: 'prompts over 272K input tokens bill the full request at long-context rates',
+        input_per_million: 2,
+        cached_input_per_million: 0.1,
+        cache_write_per_million: 2.5,
+        output_per_million: 10,
+        tiers: [
+          {
+            threshold: 272_000,
+            input_per_million: 2,
+            cached_input_per_million: 0.1,
+            cache_write_per_million: 2.5,
+            output_per_million: 10,
+          },
+          {
+            input_per_million: 4,
+            cached_input_per_million: 0.2,
+            cache_write_per_million: 5,
+            output_per_million: 15,
+          },
+        ],
+      },
       'gpt-6.1-sol': {
         currency: 'USD',
         notes: 'prompts over 272K input tokens bill the full request at long-context rates',
